@@ -5,7 +5,7 @@ import { useWoo } from '@/auth/WooContext'
 import { useAuth } from '@/auth/AuthContext'
 import { createPosOrder, type CreatePosOrderInput, type CreatedPosOrder } from '@/lib/woocommerce'
 import { createStandaloneSale } from '@/lib/standaloneDb'
-import { formatCurrency, type Product } from '@/data/mockData'
+import { formatCurrency, type Product, type Customer } from '@/data/mockData'
 import ThermalReceiptModal from '@/components/ThermalReceiptModal'
 import { printThermalReceipt, type ReceiptData, type RollSize } from '@/lib/thermalReceipt'
 
@@ -27,7 +27,7 @@ const PAYMENT_METHODS: { key: PaymentMethod; label: string; icon: React.Componen
 const TAX_RATE = 0 // configurable; set to 0 for no tax by default
 
 export default function PosPage() {
-  const { products, loading, isLive, connection, refresh, pushToast, appMode } = useWoo()
+  const { products, loading, isLive, connection, refresh, pushToast, appMode, customers } = useWoo()
   const isStandalone = appMode === 'standalone' || !connection
 
   const [query, setQuery] = useState('')
@@ -40,6 +40,28 @@ export default function PosPage() {
   const [customerMode, setCustomerMode] = useState<'walkin' | 'named'>('walkin')
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false)
+
+  const filteredCustomers = useMemo(() => {
+    const q = customerSearch.trim().toLowerCase()
+    if (!q) return customers.slice(0, 8)
+    return customers
+      .filter(
+        (c) =>
+          c.name.toLowerCase().includes(q) ||
+          c.phone.toLowerCase().includes(q) ||
+          c.email.toLowerCase().includes(q),
+      )
+      .slice(0, 8)
+  }, [customers, customerSearch])
+
+  const selectCustomer = (c: typeof customers[number]) => {
+    setCustomerName(c.name)
+    setCustomerPhone(c.phone)
+    setCustomerSearch('')
+    setShowCustomerDropdown(false)
+  }
 
   // Discount
   const [discountType, setDiscountType] = useState<'flat' | 'percent'>('flat')
@@ -452,27 +474,19 @@ export default function PosPage() {
                       </button>
                     </div>
                     {customerMode === 'named' && (
-                      <div className="grid grid-cols-2 gap-2 animate-fade-in">
-                        <div className="relative">
-                          <User className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                          <input
-                            value={customerName}
-                            onChange={(e) => setCustomerName(e.target.value)}
-                            placeholder="Customer name"
-                            className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
-                          />
-                        </div>
-                        <div className="relative">
-                          <Phone className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                          <input
-                            value={customerPhone}
-                            onChange={(e) => setCustomerPhone(e.target.value)}
-                            placeholder="Phone number"
-                            type="tel"
-                            className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
-                          />
-                        </div>
-                      </div>
+                      <CustomerPicker
+                        customers={customers}
+                        filteredCustomers={filteredCustomers}
+                        customerSearch={customerSearch}
+                        setCustomerSearch={setCustomerSearch}
+                        showDropdown={showCustomerDropdown}
+                        setShowDropdown={setShowCustomerDropdown}
+                        customerName={customerName}
+                        setCustomerName={setCustomerName}
+                        customerPhone={customerPhone}
+                        setCustomerPhone={setCustomerPhone}
+                        onSelect={selectCustomer}
+                      />
                     )}
                   </div>
 
@@ -745,27 +759,19 @@ export default function PosPage() {
                     </button>
                   </div>
                   {customerMode === 'named' && (
-                    <div className="grid grid-cols-2 gap-2 animate-fade-in">
-                      <div className="relative">
-                        <User className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                        <input
-                          value={customerName}
-                          onChange={(e) => setCustomerName(e.target.value)}
-                          placeholder="Customer name"
-                          className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
-                        />
-                      </div>
-                      <div className="relative">
-                        <Phone className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                        <input
-                          value={customerPhone}
-                          onChange={(e) => setCustomerPhone(e.target.value)}
-                          placeholder="Phone number"
-                          type="tel"
-                          className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
-                        />
-                      </div>
-                    </div>
+                    <CustomerPicker
+                      customers={customers}
+                      filteredCustomers={filteredCustomers}
+                      customerSearch={customerSearch}
+                      setCustomerSearch={setCustomerSearch}
+                      showDropdown={showCustomerDropdown}
+                      setShowDropdown={setShowCustomerDropdown}
+                      customerName={customerName}
+                      setCustomerName={setCustomerName}
+                      customerPhone={customerPhone}
+                      setCustomerPhone={setCustomerPhone}
+                      onSelect={selectCustomer}
+                    />
                   )}
                 </div>
 
@@ -893,6 +899,110 @@ export default function PosPage() {
         />
       )}
     </AppLayout>
+  )
+}
+
+/* ---------------- Customer Picker (searchable dropdown) ---------------- */
+
+function CustomerPicker({
+  customers,
+  filteredCustomers,
+  customerSearch,
+  setCustomerSearch,
+  showDropdown,
+  setShowDropdown,
+  customerName,
+  setCustomerName,
+  customerPhone,
+  setCustomerPhone,
+  onSelect,
+}: {
+  customers: Customer[]
+  filteredCustomers: Customer[]
+  customerSearch: string
+  setCustomerSearch: (v: string) => void
+  showDropdown: boolean
+  setShowDropdown: (v: boolean) => void
+  customerName: string
+  setCustomerName: (v: string) => void
+  customerPhone: string
+  setCustomerPhone: (v: string) => void
+  onSelect: (c: Customer) => void
+}) {
+  return (
+    <div className="space-y-2 animate-fade-in">
+      {/* Searchable customer dropdown */}
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+        <input
+          value={customerSearch}
+          onChange={(e) => {
+            setCustomerSearch(e.target.value)
+            setShowDropdown(true)
+          }}
+          onFocus={() => setShowDropdown(true)}
+          onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
+          placeholder="Search existing customers by name, phone, or email…"
+          className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
+        />
+        {showDropdown && filteredCustomers.length > 0 && (
+          <div className="absolute z-30 mt-1 max-h-52 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+            {filteredCustomers.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onSelect(c)}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left transition hover:bg-brand-50"
+              >
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand text-[10px] font-semibold text-white">
+                  {c.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-slate-900">{c.name}</p>
+                  <p className="truncate text-xs text-slate-400">
+                    {c.phone || 'No phone'} · {c.email || 'No email'}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+        {showDropdown && customerSearch.trim() && filteredCustomers.length === 0 && customers.length > 0 && (
+          <div className="absolute z-30 mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-400 shadow-lg">
+            No matching customers found. Fill in the details below manually.
+          </div>
+        )}
+        {showDropdown && customers.length === 0 && (
+          <div className="absolute z-30 mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-400 shadow-lg">
+            No customers yet. Add some from the Customers page.
+          </div>
+        )}
+      </div>
+
+      {/* Manual name + phone fields (auto-filled on selection, editable) */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="relative">
+          <User className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <input
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            placeholder="Customer name"
+            className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
+          />
+        </div>
+        <div className="relative">
+          <Phone className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <input
+            value={customerPhone}
+            onChange={(e) => setCustomerPhone(e.target.value)}
+            placeholder="Phone number"
+            type="tel"
+            className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
+          />
+        </div>
+      </div>
+    </div>
   )
 }
 
