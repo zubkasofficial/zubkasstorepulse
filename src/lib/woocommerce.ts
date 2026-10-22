@@ -168,7 +168,7 @@ export async function saveConnectionToCloud(data: WooConnection): Promise<void> 
       const { error: updateError } = await sb
         .from('store_settings')
         .update({
-          store_url: data.storeUrl,
+          woocommerce_url: data.storeUrl,
           consumer_key: data.consumerKey,
           consumer_secret: data.consumerSecret,
           updated_at: new Date().toISOString(),
@@ -181,7 +181,7 @@ export async function saveConnectionToCloud(data: WooConnection): Promise<void> 
       const { error: insertError } = await sb
         .from('store_settings')
         .insert([
-          { store_url: data.storeUrl, consumer_key: data.consumerKey, consumer_secret: data.consumerSecret }
+          { woocommerce_url: data.storeUrl, consumer_key: data.consumerKey, consumer_secret: data.consumerSecret }
         ])
       if (insertError) {
         console.error('[store_settings] insert error:', insertError.message, insertError.code)
@@ -201,9 +201,9 @@ export async function fetchConnectionFromCloud(): Promise<WooConnection | null> 
       return null
     }
     if (!data) return null
-    if (!data.store_url || !data.consumer_key) return null
+    if (!data.woocommerce_url || !data.consumer_key) return null
     return {
-      storeUrl: data.store_url,
+      storeUrl: data.woocommerce_url,
       consumerKey: data.consumer_key,
       consumerSecret: data.consumer_secret ?? '',
       connectedAt: data.connected_at ?? new Date().toISOString(),
