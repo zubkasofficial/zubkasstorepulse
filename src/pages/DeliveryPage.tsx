@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Bike, MapPin, Phone, CircleCheck as CheckCircle2, Navigation, Wallet, Package, Loader as Loader2, X, Clock, RefreshCw, User } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
 import SignaturePad from '@/components/SignaturePad'
@@ -6,8 +6,9 @@ import { EmptyState } from '@/components/LoadingStates'
 import { useWoo } from '@/auth/WooContext'
 import { completeOrderDelivery } from '@/lib/woocommerce'
 import {
-  getDeliveryStaff, getAssignment, getAllCompletions,
+  getDeliveryStaffAsync, getAssignment, getAllCompletions,
   buildDirectionsUrl, buildTelUrl,
+  type DeliveryStaff,
 } from '@/lib/deliveryStaff'
 import { formatCurrency, type Order } from '@/data/mockData'
 import { resolveCustomerName } from '@/lib/customerName'
@@ -19,8 +20,22 @@ export default function DeliveryPage() {
   const [completeTarget, setCompleteTarget] = useState<Order | null>(null)
   const [signature, setSignature] = useState('')
   const [processing, setProcessing] = useState(false)
+  const [staff, setStaff] = useState<DeliveryStaff[]>([])
+  const [staffLoading, setStaffLoading] = useState(true)
 
-  const staff = useMemo(() => getDeliveryStaff(), [])
+  useEffect(() => {
+    let cancelled = false
+    setStaffLoading(true)
+    getDeliveryStaffAsync().then((s) => {
+      if (!cancelled) {
+        setStaff(s)
+        setStaffLoading(false)
+      }
+    }).catch(() => {
+      if (!cancelled) setStaffLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [])
 
   const assignedOrders = useMemo(() => {
     return orders.filter((o) => {
@@ -108,9 +123,10 @@ export default function DeliveryPage() {
           <select
             value={staffId}
             onChange={(e) => setStaffId(e.target.value)}
-            className="input-field max-w-xs"
+            disabled={staffLoading}
+            className="input-field max-w-xs disabled:opacity-50"
           >
-            <option value="all">All Staff</option>
+            <option value="all">{staffLoading ? 'Loading staff…' : 'All Staff'}</option>
             {staff.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name} {s.status === 'On Leave' ? '(On Leave)' : ''}

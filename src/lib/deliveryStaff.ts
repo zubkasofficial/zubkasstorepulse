@@ -104,9 +104,39 @@ export async function pushDeliveryStaffToCloud(staff: DeliveryStaff[]): Promise<
   }
 }
 
+/* ---------------- Fetch delivery drivers from staff_users table ---------------- */
+
+export async function fetchDeliveryDriversFromStaff(): Promise<DeliveryStaff[]> {
+  const sb = getSupabase()
+  if (!sb) return getLocalStaff()
+  try {
+    const { data, error } = await sb
+      .from('staff_users')
+      .select('id, name, phone, role, is_active, created_at')
+      .eq('role', 'delivery_driver')
+      .order('name', { ascending: true })
+    if (error || !data) return getLocalStaff()
+    return (data as Array<{ id: string; name: string; phone: string; role: string; is_active: boolean; created_at: string }>).map((r) => ({
+      id: r.id,
+      name: r.name,
+      phone: r.phone ?? '',
+      vehicle: '',
+      status: r.is_active ? 'Active' as DeliveryStaffStatus : 'On Leave' as DeliveryStaffStatus,
+      createdAt: r.created_at ?? new Date().toISOString(),
+    }))
+  } catch {
+    return getLocalStaff()
+  }
+}
+
 /* ---------------- public API ---------------- */
 
 export async function getDeliveryStaffAsync(): Promise<DeliveryStaff[]> {
+  const drivers = await fetchDeliveryDriversFromStaff()
+  if (drivers.length > 0) {
+    saveLocalStaff(drivers)
+    return drivers
+  }
   const cloud = await fetchDeliveryStaffFromCloud()
   if (cloud && cloud.length > 0) {
     saveLocalStaff(cloud)

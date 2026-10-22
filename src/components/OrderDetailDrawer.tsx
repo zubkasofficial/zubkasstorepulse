@@ -10,7 +10,7 @@ import {
   type ShippingInfo,
 } from '@/lib/shipping'
 import {
-  getDeliveryStaff, getActiveStaff, getAssignment, assignDeliveryStaff, unassignDelivery,
+  getDeliveryStaffAsync, getAssignment, assignDeliveryStaff, unassignDelivery,
   type DeliveryStaff, type DeliveryAssignment,
 } from '@/lib/deliveryStaff'
 import { getStoreProfile } from '@/lib/storeProfile'
@@ -38,6 +38,18 @@ export default function OrderDetailDrawer({ order, customers = [], onClose, onSt
   const [showInvoiceModal, setShowInvoiceModal] = useState(false)
   const [showLabelModal, setShowLabelModal] = useState(false)
   const [showThermalModal, setShowThermalModal] = useState(false)
+  const [activeStaff, setActiveStaff] = useState<DeliveryStaff[]>([])
+  const [allStaff, setAllStaff] = useState<DeliveryStaff[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    getDeliveryStaffAsync().then((s) => {
+      if (cancelled) return
+      setAllStaff(s)
+      setActiveStaff(s.filter((m) => m.status === 'Active'))
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     if (!order) return
@@ -58,11 +70,9 @@ export default function OrderDetailDrawer({ order, customers = [], onClose, onSt
 
   if (!order) return null
 
-  const activeStaff = getActiveStaff()
-
   const handleAssign = () => {
     if (!selectedStaffId) return
-    const staff = getDeliveryStaff().find((s) => s.id === selectedStaffId)
+    const staff = allStaff.find((s) => s.id === selectedStaffId)
     if (!staff) return
     const a = assignDeliveryStaff(order.id, staff)
     setAssignment(a)
