@@ -157,29 +157,50 @@ import { getSupabase } from '@/lib/supabase'
 export async function saveConnectionToCloud(data: WooConnection): Promise<void> {
   try {
     const sb = getSupabase()
-    const { data: existing } = await sb.from('store_settings').select('id').limit(1).maybeSingle()
-    const payload = {
-      store_url: data.storeUrl,
-      consumer_key: data.consumerKey,
-      consumer_secret: data.consumerSecret,
-      connected_at: data.connectedAt,
-      updated_at: new Date().toISOString(),
+    const { data: existing, error: selectError } = await sb
+      .from('store_settings')
+      .select('id')
+      .maybeSingle()
+    if (selectError) {
+      console.error('[store_settings] select error:', selectError.message, selectError.code)
     }
-    if (existing) {
-      await sb.from('store_settings').update(payload).eq('id', existing.id)
+    if (existing?.id) {
+      const { error: updateError } = await sb
+        .from('store_settings')
+        .update({
+          store_url: data.storeUrl,
+          consumer_key: data.consumerKey,
+          consumer_secret: data.consumerSecret,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id)
+      if (updateError) {
+        console.error('[store_settings] update error:', updateError.message, updateError.code)
+      }
     } else {
-      await sb.from('store_settings').insert({ id: 1, ...payload })
+      const { error: insertError } = await sb
+        .from('store_settings')
+        .insert([
+          { store_url: data.storeUrl, consumer_key: data.consumerKey, consumer_secret: data.consumerSecret }
+        ])
+      if (insertError) {
+        console.error('[store_settings] insert error:', insertError.message, insertError.code)
+      }
     }
-  } catch {
-    /* ignore — local storage still works as fallback */
+  } catch (err) {
+    console.error('[store_settings] saveConnectionToCloud exception:', err)
   }
 }
 
 export async function fetchConnectionFromCloud(): Promise<WooConnection | null> {
   try {
     const sb = getSupabase()
-    const { data, error } = await sb.from('store_settings').select('*').limit(1).maybeSingle()
-    if (error || !data) return null
+    const { data, error } = await sb.from('store_settings').select('*').maybeSingle()
+    if (error) {
+      console.error('[store_settings] fetch error:', error.message, error.code)
+      return null
+    }
+    if (!data) return null
     if (!data.store_url || !data.consumer_key) return null
     return {
       storeUrl: data.store_url,
@@ -187,7 +208,8 @@ export async function fetchConnectionFromCloud(): Promise<WooConnection | null> 
       consumerSecret: data.consumer_secret ?? '',
       connectedAt: data.connected_at ?? new Date().toISOString(),
     }
-  } catch {
+  } catch (err) {
+    console.error('[store_settings] fetchConnectionFromCloud exception:', err)
     return null
   }
 }
@@ -195,9 +217,12 @@ export async function fetchConnectionFromCloud(): Promise<WooConnection | null> 
 export async function clearConnectionFromCloud(): Promise<void> {
   try {
     const sb = getSupabase()
-    await sb.from('store_settings').delete().eq('id', 1)
-  } catch {
-    /* ignore */
+    const { error } = await sb.from('store_settings').delete().eq('id', 1)
+    if (error) {
+      console.error('[store_settings] delete error:', error.message, error.code)
+    }
+  } catch (err) {
+    console.error('[store_settings] clearConnectionFromCloud exception:', err)
   }
 }
 

@@ -261,13 +261,21 @@ export function WooProvider({ children }: { children: ReactNode }) {
     if (isStandalone) return
     // If we already have a local connection, still check cloud for updates
     (async () => {
-      const cloudConn = await fetchConnectionFromCloud()
-      if (cancelled) return
-      if (cloudConn) {
-        saveConnection(cloudConn)
-        setConnection(cloudConn)
-      } else if (!getConnection()) {
-        // No cloud creds and no local creds — nothing to do
+      try {
+        const cloudConn = await fetchConnectionFromCloud()
+        if (cancelled) return
+        if (cloudConn) {
+          saveConnection(cloudConn)
+          setConnection(cloudConn)
+        } else if (!getConnection()) {
+          // No cloud creds and no local creds — nothing to do
+          console.info('[WooContext] No cloud or local WooCommerce credentials found.')
+        }
+      } catch (err) {
+        console.error('[WooContext] Failed to fetch credentials from store_settings:', err)
+        // Fall back to whatever is in localStorage — don't block app rendering
+        const localConn = getConnection()
+        if (localConn) setConnection(localConn)
       }
     })()
     return () => { cancelled = true }
