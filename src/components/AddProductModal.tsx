@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { X, Loader as Loader2, Check, Package, Plus, Trash2, DollarSign, Boxes, Download, Layers, Image as ImageIcon2, CloudUpload as UploadCloud, Link as LinkIcon, CircleAlert as AlertCircle, RefreshCw } from 'lucide-react'
-import { PRODUCT_CATEGORIES, type Product, type ProductType, type TaxStatus, type Backorders, type DownloadableFile, type ProductAttribute, type ProductVariation } from '@/data/mockData'
+import { type Product, type ProductType, type TaxStatus, type Backorders, type DownloadableFile, type ProductAttribute, type ProductVariation } from '@/data/mockData'
 import { useWoo } from '@/auth/WooContext'
+import { fetchCategoriesFromCloud, type Category } from '@/lib/categories'
 
 type Tab = 'general' | 'inventory' | 'downloads' | 'attributes' | 'media'
 
@@ -44,7 +45,7 @@ type AddProductModalProps = {
 const EMPTY_FORM: ProductFormData = {
   name: '',
   sku: '',
-  category: PRODUCT_CATEGORIES[0],
+  category: '',
   price: '',
   salePrice: '',
   saleStartDate: '',
@@ -83,6 +84,7 @@ export default function AddProductModal({ open, mode, product, onClose, onSave }
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [tab, setTab] = useState<Tab>('general')
+  const [categories, setCategories] = useState<Category[]>([])
 
   // Image upload state
   const [imagePreview, setImagePreview] = useState('')
@@ -94,6 +96,16 @@ export default function AddProductModal({ open, mode, product, onClose, onSave }
 
   useEffect(() => {
     if (!open) return
+    fetchCategoriesFromCloud().then((cats) => {
+      const productName = mode === 'edit' && product ? product.category : ''
+      const merged = productName && !cats.some((c) => c.name === productName)
+        ? [...cats, { id: `local-${Date.now()}`, name: productName, slug: productName.toLowerCase(), createdAt: new Date().toISOString() }]
+        : cats
+      setCategories(merged)
+      if (!mode || mode === 'create') {
+        setForm((f) => (f.category ? f : { ...f, category: merged[0]?.name ?? '' }))
+      }
+    })
     if (mode === 'edit' && product) {
       setForm({
         name: product.name,
@@ -875,9 +887,13 @@ export default function AddProductModal({ open, mode, product, onClose, onSave }
                     onChange={(e) => update('category', e.target.value)}
                     className="input-field"
                   >
-                    {PRODUCT_CATEGORIES.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
+                    {categories.length > 0 ? (
+                      categories.map((c) => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
+                      ))
+                    ) : (
+                      <option value="">Loading categories…</option>
+                    )}
                   </select>
                 </Field>
                 <Field label="Product Tags" htmlFor="p-tags" hint="Comma separated">
