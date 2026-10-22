@@ -24,7 +24,14 @@ type Tab = 'profile' | 'woocommerce' | 'database' | 'shipping' | 'delivery'
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export default function SettingsPage() {
+  const { appMode } = useWoo()
   const [tab, setTab] = useState<Tab>('profile')
+
+  useEffect(() => {
+    if (appMode === 'standalone' && tab === 'woocommerce') {
+      setTab('profile')
+    }
+  }, [appMode, tab])
 
   return (
     <AppLayout>
@@ -39,9 +46,11 @@ export default function SettingsPage() {
           <TabButton active={tab === 'profile'} onClick={() => setTab('profile')}>
             <ShieldCheck className="h-4 w-4" /> Profile &amp; Security
           </TabButton>
-          <TabButton active={tab === 'woocommerce'} onClick={() => setTab('woocommerce')}>
-            <Plug className="h-4 w-4" /> WooCommerce
-          </TabButton>
+          {appMode === 'woo' && (
+            <TabButton active={tab === 'woocommerce'} onClick={() => setTab('woocommerce')}>
+              <Plug className="h-4 w-4" /> WooCommerce
+            </TabButton>
+          )}
           <TabButton active={tab === 'database'} onClick={() => setTab('database')}>
             <Database className="h-4 w-4" /> Database &amp; Cloud
           </TabButton>
@@ -54,7 +63,7 @@ export default function SettingsPage() {
         </div>
 
         {tab === 'profile' && <ProfileSecurityTab />}
-        {tab === 'woocommerce' && <WooCommerceTab />}
+        {tab === 'woocommerce' && appMode === 'woo' && <WooCommerceTab />}
         {tab === 'database' && <DatabaseCloudTab />}
         {tab === 'shipping' && <ShippingCouriersTab />}
         {tab === 'delivery' && <DeliveryStaffTab />}
