@@ -6,7 +6,7 @@ import {
   type WooConnection, type Order, type Product, type Customer, type SalesReportData,
 } from '@/lib/woocommerce'
 import { playOrderChime, unlockAudio } from '@/lib/alertSound'
-import { getAppMode, setAppMode as persistAppMode, type AppMode } from '@/lib/appMode'
+import { getAppMode, setAppMode as persistAppMode, saveOperationalModeToCloud, fetchOperationalModeFromCloud, type AppMode } from '@/lib/appMode'
 import { fetchStandaloneProducts, fetchStandaloneOrders } from '@/lib/standaloneDb'
 
 type Toast = { id: number; type: 'success' | 'error'; message: string }
@@ -29,6 +29,7 @@ type WooContextValue = {
   appMode: AppMode
   isStandalone: boolean
   setAppMode: (mode: AppMode) => void
+  saveOperationalMode: (mode: AppMode) => Promise<void>
   // live data
   orders: Order[]
   products: Product[]
@@ -224,6 +225,14 @@ export function WooProvider({ children }: { children: ReactNode }) {
     firstLoadRef.current = true
   }, [])
 
+  const saveOperationalMode = useCallback(async (mode: AppMode) => {
+    persistAppMode(mode)
+    setAppModeState(mode)
+    knownOrderIdsRef.current = new Set()
+    firstLoadRef.current = true
+    await saveOperationalModeToCloud(mode)
+  }, [])
+
   const updateOrder = useCallback((id: string, patch: Partial<Order>) => {
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)))
   }, [])
@@ -252,6 +261,25 @@ export function WooProvider({ children }: { children: ReactNode }) {
     }
     window.addEventListener('appmode-change', handler)
     return () => window.removeEventListener('appmode-change', handler)
+  }, [])
+
+  // On app startup: fetch operational mode from Supabase (fallback to localStorage)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const cloudMode = await fetchOperationalModeFromCloud()
+        if (cancelled) return
+        if (cloudMode) {
+          persistAppMode(cloudMode)
+          setAppModeState(cloudMode)
+        }
+      } catch (err) {
+        console.error('[WooContext] Failed to fetch operational mode from cloud:', err)
+      }
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // On app startup: fetch WooCommerce credentials from Supabase first,
@@ -330,6 +358,7 @@ export function WooProvider({ children }: { children: ReactNode }) {
         appMode,
         isStandalone,
         setAppMode,
+        saveOperationalMode,
         orders,
         products,
         customers,

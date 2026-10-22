@@ -1,4 +1,5 @@
 import { getConnection } from '@/lib/woocommerce'
+import { getSupabase } from '@/lib/supabase'
 
 export type AppMode = 'standalone' | 'woo'
 
@@ -11,7 +12,6 @@ export function getAppMode(): AppMode {
   } catch {
     /* ignore */
   }
-  // Default: standalone unless WooCommerce keys are already present
   return getConnection() ? 'woo' : 'standalone'
 }
 
@@ -21,5 +21,52 @@ export function setAppMode(mode: AppMode): void {
     window.dispatchEvent(new CustomEvent('appmode-change', { detail: mode }))
   } catch {
     /* ignore */
+  }
+}
+
+export async function saveOperationalModeToCloud(mode: AppMode): Promise<void> {
+  try {
+    const sb = getSupabase()
+    const { data: existing, error: selectError } = await sb
+      .from('store_settings')
+      .select('id')
+      .maybeSingle()
+    if (selectError) {
+      console.error('[store_settings] operational mode select error:', selectError.message, selectError.code)
+    }
+    if (existing?.id) {
+      const { error: updateError } = await sb
+        .from('store_settings')
+        .update({ operational_mode: mode, updated_at: new Date().toISOString() })
+        .eq('id', existing.id)
+      if (updateError) {
+        console.error('[store_settings] operational mode update error:', updateError.message, updateError.code)
+      }
+    } else {
+      const { error: insertError } = await sb
+        .from('store_settings')
+        .insert([{ operational_mode: mode }])
+      if (insertError) {
+        console.error('[store_settings] operational mode insert error:', insertError.message, insertError.code)
+      }
+    }
+  } catch (err) {
+    console.error('[store_settings] saveOperationalModeToCloud exception:', err)
+  }
+}
+
+export async function fetchOperationalModeFromCloud(): Promise<AppMode | null> {
+  try {
+    const sb = getSupabase()
+    const { data, error } = await sb.from('store_settings').select('operational_mode').maybeSingle()
+    if (error) {
+      console.error('[store_settings] operational mode fetch error:', error.message, error.code)
+      return null
+    }
+    if (!data) return null
+    return data.operational_mode === 'woo' ? 'woo' : data.operational_mode === 'standalone' ? 'standalone' : null
+  } catch (err) {
+    console.error('[store_settings] fetchOperationalModeFromCloud exception:', err)
+    return null
   }
 }

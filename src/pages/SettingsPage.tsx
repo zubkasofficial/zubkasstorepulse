@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Mail, Lock, Eye, EyeOff, Loader as Loader2, CircleCheck as CheckCircle2, Phone, Building2, ArrowRight, ShieldCheck, CircleAlert as AlertCircle, Globe, Key, Plug, Trash2, RefreshCw, Truck, Pencil, Plus, X, Bike, Store, MapPin, FileText, Image as ImageIcon, Database, Cloud, CloudOff, Zap, CloudDownload as DownloadCloud, CloudUpload as UploadCloud, Settings2, Box } from 'lucide-react'
 import AppLayout from '../components/AppLayout'
 import { useAuth } from '../auth/AuthContext'
@@ -80,22 +80,29 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
 
 function ProfileSecurityTab() {
   const { user, refreshSession } = useAuth()
-  const { appMode, setAppMode } = useWoo()
+  const { appMode, saveOperationalMode } = useWoo()
 
-  // Operational mode
+  // Operational mode — local selection only, persisted on Save
+  const [selectedMode, setSelectedMode] = useState<'standalone' | 'woo'>(appMode)
   const [modeSaving, setModeSaving] = useState(false)
   const [modeSaved, setModeSaved] = useState(false)
 
-  const handleModeChange = (mode: 'standalone' | 'woo') => {
-    if (mode === appMode || modeSaving) return
+  useEffect(() => {
+    setSelectedMode(appMode)
+  }, [appMode])
+
+  const handleModeSelect = (mode: 'standalone' | 'woo') => {
+    setSelectedMode(mode)
+    setModeSaved(false)
+  }
+
+  const handleModeSave = async () => {
+    if (modeSaving) return
     setModeSaving(true)
-    setAppMode(mode)
-    localStorage.setItem('app_mode', mode === 'standalone' ? 'standalone' : 'woocommerce')
-    window.setTimeout(() => {
-      setModeSaving(false)
-      setModeSaved(true)
-      window.setTimeout(() => setModeSaved(false), 2500)
-    }, 350)
+    await saveOperationalMode(selectedMode)
+    setModeSaving(false)
+    setModeSaved(true)
+    window.setTimeout(() => setModeSaved(false), 2500)
   }
 
   // Business profile
@@ -221,16 +228,16 @@ function ProfileSecurityTab() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <button
               type="button"
-              onClick={() => handleModeChange('standalone')}
+              onClick={() => handleModeSelect('standalone')}
               className={`flex flex-col items-start rounded-2xl border-2 p-5 text-left transition ${
-                appMode === 'standalone'
+                selectedMode === 'standalone'
                   ? 'border-brand bg-brand-50/20 shadow-sm'
                   : 'border-slate-200 bg-white hover:border-slate-300'
               }`}
             >
               <div className="flex items-center gap-3">
                 <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                  appMode === 'standalone' ? 'bg-brand text-white' : 'bg-slate-100 text-slate-500'
+                  selectedMode === 'standalone' ? 'bg-brand text-white' : 'bg-slate-100 text-slate-500'
                 }`}>
                   <Box className="h-5 w-5" />
                 </span>
@@ -246,16 +253,16 @@ function ProfileSecurityTab() {
 
             <button
               type="button"
-              onClick={() => handleModeChange('woo')}
+              onClick={() => handleModeSelect('woo')}
               className={`flex flex-col items-start rounded-2xl border-2 p-5 text-left transition ${
-                appMode === 'woo'
+                selectedMode === 'woo'
                   ? 'border-brand bg-brand-50/20 shadow-sm'
                   : 'border-slate-200 bg-white hover:border-slate-300'
               }`}
             >
               <div className="flex items-center gap-3">
                 <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                  appMode === 'woo' ? 'bg-brand text-white' : 'bg-slate-100 text-slate-500'
+                  selectedMode === 'woo' ? 'bg-brand text-white' : 'bg-slate-100 text-slate-500'
                 }`}>
                   <Globe className="h-5 w-5" />
                 </span>
@@ -270,11 +277,25 @@ function ProfileSecurityTab() {
             </button>
           </div>
 
-          {modeSaved && (
-            <div className="flex items-center gap-1.5 text-sm text-green-600 animate-fade-in">
-              <CheckCircle2 className="h-4 w-4" /> Operational mode updated!
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleModeSave}
+              disabled={modeSaving || selectedMode === appMode}
+              className="flex items-center gap-2 rounded-xl bg-[#9f0f0f] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#7a0b0b] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {modeSaving ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
+              ) : (
+                <>Save Operational Mode</>
+              )}
+            </button>
+            {modeSaved && (
+              <span className="flex items-center gap-1.5 text-sm text-green-600 animate-fade-in">
+                <CheckCircle2 className="h-4 w-4" /> Operational mode saved and synced!
+              </span>
+            )}
+          </div>
         </div>
       </Section>
 
