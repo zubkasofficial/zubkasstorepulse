@@ -103,7 +103,9 @@ export type Customer = {
   id: string
   name: string
   email: string
+  phone: string
   location: string
+  address: string
   orders: number
   spent: number
   joined: string

@@ -1,5 +1,6 @@
 import { getSupabase } from '@/lib/supabase'
 import type { WooConnection } from '@/lib/woocommerce'
+import type { AppMode } from '@/lib/appMode'
 
 export type Category = {
   id: string
@@ -7,13 +8,6 @@ export type Category = {
   slug: string
   createdAt: string
 }
-
-const FALLBACK_CATEGORIES: Category[] = [
-  { id: 'cat-electronics', name: 'Electronics', slug: 'electronics', createdAt: new Date().toISOString() },
-  { id: 'cat-wearables', name: 'Wearables', slug: 'wearables', createdAt: new Date().toISOString() },
-  { id: 'cat-home-living', name: 'Home & Living', slug: 'home-living', createdAt: new Date().toISOString() },
-  { id: 'cat-accessories', name: 'Accessories', slug: 'accessories', createdAt: new Date().toISOString() },
-]
 
 const CACHE_KEY = 'zubkas_categories_cache'
 
@@ -48,13 +42,15 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
+/* ---------------- mode-aware fetching ---------------- */
+
 export async function fetchCategoriesFromCloud(): Promise<Category[]> {
   const sb = getSupabase()
-  if (!sb) return getCached().length > 0 ? getCached() : FALLBACK_CATEGORIES
+  if (!sb) return getCached()
   try {
     const { data, error } = await sb.from('categories').select('*').order('name', { ascending: true })
     if (error || !data) {
-      return getCached().length > 0 ? getCached() : FALLBACK_CATEGORIES
+      return getCached()
     }
     const mapped: Category[] = (data as Array<{ id: string; name: string; slug: string; created_at: string }>).map((r) => ({
       id: r.id,
@@ -65,21 +61,138 @@ export async function fetchCategoriesFromCloud(): Promise<Category[]> {
     setCached(mapped)
     return mapped
   } catch {
-    return getCached().length > 0 ? getCached() : FALLBACK_CATEGORIES
+    return getCached()
   }
 }
 
-export async function createCategoryInCloud(name: string): Promise<Category | null> {
+type WooCategoryRaw = {
+  id: number
+  name: string
+  slug: string
+  count?: number
+}
+
+export async function fetchCategoriesFromWooCommerce(conn: WooConnection): Promise<Category[]> {
+  const base = conn.storeUrl.replace(/\/+$/, '')
+  const auth = btoa(`${conn.consumerKey}:${conn.consumerSecret}`)
+  const directUrl = `${base}/wp-json/wc/v3/products/categories?per_page=100&orderby=name&order=asc`
+
+  const headers: Record<string, string> = {
+    Authorization: `Basic ${auth}`,
+    'Content-Type': 'application/json',
+  }
+
+  const proxies = [
+    (url: string) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+    (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  ]
+
+  let data: WooCategoryRaw[] | null = null
+
+  try {
+    const res = await fetch(directUrl, { method: 'GET', headers })
+    if (res.ok) {
+      data = (await res.json()) as WooCategoryRaw[]
+    }
+  } catch {
+    /* fall through to proxy */
+  }
+
+  if (!data) {
+    const proxyUrl = `${directUrl}&consumer_key=${encodeURIComponent(conn.consumerKey)}&consumer_secret=${encodeURIComponent(conn.consumerSecret)}`
+    for (const proxy of proxies) {
+      try {
+        const res = await fetch(proxy(proxyUrl), { method: 'GET', headers })
+        if (res.ok) {
+          data = (await res.json()) as WooCategoryRaw[]
+          break
+        }
+      } catch {
+        /* try next */
+      }
+    }
+  }
+
+  if (!data) return getCached()
+
+  const mapped: Category[] = data.map((c) => ({
+    id: `woo-${c.id}`,
+    name: c.name,
+    slug: c.slug,
+    createdAt: new Date().toISOString(),
+  }))
+  return mapped
+}
+
+export async function fetchCategories(mode: AppMode, connection: WooConnection | null): Promise<Category[]> {
+  if (mode === 'woo' && connection) {
+    try {
+      return await fetchCategoriesFromWooCommerce(connection)
+    } catch {
+      return fetchCategoriesFromCloud()
+    }
+  }
+  return fetchCategoriesFromCloud()
+}
+
+/* ---------------- typed create result ---------------- */
+
+export type CreateCategoryResult =
+  | { ok: true; category: Category }
+  | { ok: false; error: string; code?: string }
+
+export async function createCategoryInCloud(name: string): Promise<CreateCategoryResult> {
   const sb = getSupabase()
-  if (!sb) return null
-  const slug = slugify(name)
+  if (!sb) return { ok: false, error: 'Cloud database is not connected.' }
+
+  const trimmed = name.trim()
+  if (!trimmed) return { ok: false, error: 'Category name cannot be empty.' }
+
+  const slug = slugify(trimmed)
+
+  // Check for existing slug or name in the database before inserting
+  try {
+    const { data: existing, error: checkError } = await sb
+      .from('categories')
+      .select('id, name, slug')
+      .or(`slug.eq.${slug},name.eq.${trimmed}`)
+      .maybeSingle()
+
+    if (checkError) {
+      return { ok: false, error: `Failed to check existing categories: ${checkError.message}`, code: checkError.code }
+    }
+
+    if (existing) {
+      const existingRow = existing as { id: string; name: string; slug: string }
+      if (existingRow.slug === slug) {
+        return { ok: false, error: `A category with slug "${slug}" already exists.`, code: '23505' }
+      }
+      return { ok: false, error: `A category named "${existingRow.name}" already exists.`, code: '23505' }
+    }
+  } catch (err) {
+    return { ok: false, error: `Failed to check existing categories: ${err instanceof Error ? err.message : 'Unknown error'}` }
+  }
+
+  // Insert the new category
   try {
     const { data, error } = await sb
       .from('categories')
-      .insert({ name, slug })
+      .insert({ name: trimmed, slug })
       .select('*')
       .single()
-    if (error || !data) return null
+
+    if (error) {
+      // Handle unique constraint violation gracefully
+      if (error.code === '23505') {
+        return { ok: false, error: `This category name or slug already exists.`, code: '23505' }
+      }
+      return { ok: false, error: error.message, code: error.code }
+    }
+
+    if (!data) {
+      return { ok: false, error: 'No data returned from database after insert.' }
+    }
+
     const created: Category = {
       id: (data as { id: string }).id,
       name: (data as { name: string }).name,
@@ -88,9 +201,9 @@ export async function createCategoryInCloud(name: string): Promise<Category | nu
     }
     const updated = [...getCached(), created]
     setCached(updated)
-    return created
-  } catch {
-    return null
+    return { ok: true, category: created }
+  } catch (err) {
+    return { ok: false, error: `Failed to create category: ${err instanceof Error ? err.message : 'Unknown error'}` }
   }
 }
 

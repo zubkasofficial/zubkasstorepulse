@@ -8,6 +8,7 @@ import {
 import { playOrderChime, unlockAudio } from '@/lib/alertSound'
 import { getAppMode, setAppMode as persistAppMode, saveOperationalModeToCloud, fetchOperationalModeFromCloud, type AppMode } from '@/lib/appMode'
 import { fetchStandaloneProducts, fetchStandaloneOrders } from '@/lib/standaloneDb'
+import { fetchStandaloneCustomers } from '@/lib/customers'
 
 const SEEN_ORDERS_KEY = 'zubkas_seen_order_ids'
 const SEEN_MAX = 500
@@ -61,6 +62,11 @@ type WooContextValue = {
   addProduct: (product: Product) => void
   updateProduct: (id: string, patch: Partial<Product>) => void
   removeProduct: (id: string) => void
+  // customer mutations
+  addCustomer: (customer: Customer) => void
+  updateCustomer: (id: string, patch: Partial<Customer>) => void
+  removeCustomer: (id: string) => void
+  setCustomers: (customers: Customer[]) => void
   // toasts
   toasts: Toast[]
   pushToast: (type: 'success' | 'error', message: string) => void
@@ -140,10 +146,10 @@ export function WooProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(() => {
     if (isStandalone) {
       setLoading(true)
-      Promise.all([fetchStandaloneProducts(), fetchStandaloneOrders()])
-        .then(([p, o]) => {
+      Promise.all([fetchStandaloneProducts(), fetchStandaloneOrders(), fetchStandaloneCustomers()])
+        .then(([p, o, c]) => {
           setProducts(p)
-          setCustomers([])
+          setCustomers(c)
           setSalesReport(null)
           setOrders(o)
           if (firstLoadRef.current) {
@@ -271,6 +277,22 @@ export function WooProvider({ children }: { children: ReactNode }) {
     setProducts((prev) => prev.filter((p) => p.id !== id))
   }, [])
 
+  const addCustomer = useCallback((customer: Customer) => {
+    setCustomers((prev) => [customer, ...prev])
+  }, [])
+
+  const updateCustomer = useCallback((id: string, patch: Partial<Customer>) => {
+    setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)))
+  }, [])
+
+  const removeCustomer = useCallback((id: string) => {
+    setCustomers((prev) => prev.filter((c) => c.id !== id))
+  }, [])
+
+  const setCustomersState = useCallback((cs: Customer[]) => {
+    setCustomers(cs)
+  }, [])
+
   // Listen for mode changes dispatched from other tabs/components
   useEffect(() => {
     const handler = (e: Event) => {
@@ -390,6 +412,10 @@ export function WooProvider({ children }: { children: ReactNode }) {
         addProduct,
         updateProduct,
         removeProduct,
+        addCustomer,
+        updateCustomer,
+        removeCustomer,
+        setCustomers: setCustomersState,
         toasts,
         pushToast,
         dismissToast,

@@ -1,8 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from 'react'
-import {
-  Package, Plus, Search, Pencil, Trash2, RefreshCw, AlertTriangle,
-  Boxes, DollarSign, X, Tag, Loader as Loader2, CircleCheck as CheckCircle2,
-} from 'lucide-react'
+import { Package, Plus, Search, Pencil, Trash2, RefreshCw, TriangleAlert as AlertTriangle, Boxes, DollarSign, X, Tag, Loader as Loader2, CircleCheck as CheckCircle2 } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
 import AddProductModal from '@/components/AddProductModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -18,7 +15,7 @@ import {
 } from '@/lib/standaloneDb'
 import { formatCurrency, type Product } from '@/data/mockData'
 import {
-  fetchCategoriesFromCloud, createCategoryInCloud, deleteCategoryFromCloud,
+  fetchCategories, createCategoryInCloud, deleteCategoryFromCloud,
   syncCategoryToWooCommerce, slugify, type Category,
 } from '@/lib/categories'
 
@@ -579,14 +576,14 @@ function CategoriesManager({
   const loadCategories = useCallback(async () => {
     setLoading(true)
     try {
-      const cats = await fetchCategoriesFromCloud()
+      const cats = await fetchCategories(appMode as 'standalone' | 'woo', connection)
       setCategories(cats)
     } catch {
       pushToast('error', 'Failed to load categories.')
     } finally {
       setLoading(false)
     }
-  }, [pushToast])
+  }, [pushToast, appMode, connection])
 
   useEffect(() => {
     loadCategories()
@@ -599,14 +596,11 @@ function CategoriesManager({
       pushToast('error', 'Enter a category name.')
       return
     }
-    if (categories.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
-      pushToast('error', 'A category with this name already exists.')
-      return
-    }
     setAdding(true)
     try {
-      const created = await createCategoryInCloud(name)
-      if (created) {
+      const result = await createCategoryInCloud(name)
+      if (result.ok) {
+        const created = result.category
         setCategories((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
         pushToast('success', `Category "${created.name}" created.`)
 
@@ -624,7 +618,7 @@ function CategoriesManager({
           }
         }
       } else {
-        pushToast('error', 'Failed to create category. It may already exist.')
+        pushToast('error', result.error)
       }
     } catch (err) {
       pushToast('error', `Failed to create category: ${err instanceof Error ? err.message : 'Unknown error'}`)

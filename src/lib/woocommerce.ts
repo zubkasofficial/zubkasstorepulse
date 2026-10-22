@@ -94,8 +94,14 @@ export type WooCustomer = {
   last_name: string
   email: string
   billing: {
+    first_name: string
+    last_name: string
+    email: string
+    phone: string
+    address_1: string
     city: string
     state: string
+    postcode: string
     country: string
   }
   orders_count: number
@@ -423,12 +429,16 @@ function mapProduct(p: WooProduct): Product {
 }
 
 function mapCustomer(c: WooCustomer): Customer {
-  const loc = [c.billing.city, c.billing.state, c.billing.country].filter(Boolean).join(', ') || '—'
+  const b = c.billing
+  const loc = [b.city, b.state, b.country].filter(Boolean).join(', ') || '—'
+  const addr = [b.address_1, b.city, b.state, b.postcode, b.country].filter(Boolean).join(', ') || '—'
   return {
     id: String(c.id),
     name: `${c.first_name} ${c.last_name}`.trim() || c.email,
-    email: c.email,
+    email: c.email || '',
+    phone: b.phone || '',
     location: loc,
+    address: addr,
     orders: c.orders_count ?? 0,
     spent: Number(c.total_spent) || 0,
     joined: fmtDate(c.date_created),
@@ -972,4 +982,106 @@ export async function updateProductField(
     body: JSON.stringify(body),
   })
   return mapProduct(updated)
+}
+
+/* ---------------- Customer CRUD (WooCommerce) ---------------- */
+
+export type CreateCustomerInput = {
+  name: string
+  email: string
+  phone: string
+  address: string
+}
+
+export type UpdateCustomerInput = Partial<CreateCustomerInput>
+
+function parseName(name: string): { first: string; last: string } {
+  const parts = name.trim().split(/\s+/)
+  const first = parts[0] || ''
+  const last = parts.slice(1).join(' ') || ''
+  return { first, last }
+}
+
+function parseAddress(addr: string): { address_1: string; city: string; state: string; postcode: string; country: string } {
+  const parts = addr.split(',').map((s) => s.trim())
+  return {
+    address_1: parts[0] || '',
+    city: parts[1] || '',
+    state: parts[2] || '',
+    postcode: parts[3] || '',
+    country: parts[4] || 'IN',
+  }
+}
+
+export async function createWooCustomer(conn: WooConnection, input: CreateCustomerInput): Promise<Customer> {
+  const { first, last } = parseName(input.name)
+  const addr = parseAddress(input.address)
+  const body = {
+    first_name: first,
+    last_name: last,
+    email: input.email,
+    billing: {
+      first_name: first,
+      last_name: last,
+      email: input.email,
+      phone: input.phone,
+      ...addr,
+    },
+    shipping: {
+      first_name: first,
+      last_name: last,
+      ...addr,
+    },
+  }
+  const created = await wooFetch<WooCustomer>(conn, 'customers', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+  return mapCustomer(created)
+}
+
+export async function updateWooCustomer(conn: WooConnection, customerId: string, input: UpdateCustomerInput): Promise<Customer> {
+  const body: Record<string, unknown> = {}
+  if (input.name !== undefined) {
+    const { first, last } = parseName(input.name)
+    body.first_name = first
+    body.last_name = last
+    body.billing = { first_name: first, last_name: last }
+  }
+  if (input.email !== undefined) {
+    body.email = input.email
+    body.billing = { ...(body.billing as Record<string, unknown> || {}), email: input.email }
+  }
+  if (input.phone !== undefined) {
+    body.billing = { ...(body.billing as Record<string, unknown> || {}), phone: input.phone }
+  }
+  if (input.address !== undefined) {
+    const addr = parseAddress(input.address)
+    body.billing = { ...(body.billing as Record<string, unknown> || {}), ...addr }
+    body.shipping = { ...addr }
+  }
+  const numericId = customerId.replace(/[^0-9]/g, '')
+  const updated = await wooFetch<WooCustomer>(conn, `customers/${numericId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+  return mapCustomer(updated)
+}
+
+export async function deleteWooCustomer(conn: WooConnection, customerId: string): Promise<void> {
+  const numericId = customerId.replace(/[^0-9]/g, '')
+  await wooFetch(conn, `customers/${numericId}?force=true`, { method: 'DELETE' })
+}
+
+/* ---------------- Category fetching (WooCommerce) ---------------- */
+
+export type WooCategory = {
+  id: number
+  name: string
+  slug: string
+  count: number
+}
+
+export async function fetchWooCategories(conn: WooConnection, perPage = 100): Promise<WooCategory[]> {
+  return wooFetch<WooCategory[]>(conn, `products/categories?per_page=${perPage}&orderby=name&order=asc`)
 }
