@@ -291,7 +291,16 @@ export default function LoginPage() {
 
         <div className="flex flex-1 flex-col justify-center">
           <div className="mb-6 flex items-center gap-3.5">
-            <img src="/zubkas_icon_hd_white.png" alt="Zubkas StorePulse" className="h-8 w-auto shrink-0 object-contain" />
+            <img
+              src="/zubkas_icon_hd_white.png"
+              alt="Zubkas StorePulse"
+              className="h-8 w-auto inline-block mr-2 align-middle shrink-0 object-contain"
+              onError={(e) => {
+                const img = e.target as HTMLImageElement
+                img.onerror = null
+                img.src = '/icon-512.svg'
+              }}
+            />
             <span className="font-['Noto_Serif'] text-lg font-semibold tracking-tight text-white">Zubkas StorePulse</span>
           </div>
 

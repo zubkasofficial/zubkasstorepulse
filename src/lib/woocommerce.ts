@@ -157,14 +157,19 @@ import { getSupabase } from '@/lib/supabase'
 export async function saveConnectionToCloud(data: WooConnection): Promise<void> {
   try {
     const sb = getSupabase()
-    await sb.from('woo_credentials').upsert({
-      id: 1,
+    const { data: existing } = await sb.from('store_settings').select('id').limit(1).maybeSingle()
+    const payload = {
       store_url: data.storeUrl,
       consumer_key: data.consumerKey,
       consumer_secret: data.consumerSecret,
       connected_at: data.connectedAt,
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'id' })
+    }
+    if (existing) {
+      await sb.from('store_settings').update(payload).eq('id', existing.id)
+    } else {
+      await sb.from('store_settings').insert({ id: 1, ...payload })
+    }
   } catch {
     /* ignore — local storage still works as fallback */
   }
@@ -173,7 +178,7 @@ export async function saveConnectionToCloud(data: WooConnection): Promise<void> 
 export async function fetchConnectionFromCloud(): Promise<WooConnection | null> {
   try {
     const sb = getSupabase()
-    const { data, error } = await sb.from('woo_credentials').select('*').eq('id', 1).maybeSingle()
+    const { data, error } = await sb.from('store_settings').select('*').limit(1).maybeSingle()
     if (error || !data) return null
     if (!data.store_url || !data.consumer_key) return null
     return {
@@ -190,7 +195,7 @@ export async function fetchConnectionFromCloud(): Promise<WooConnection | null> 
 export async function clearConnectionFromCloud(): Promise<void> {
   try {
     const sb = getSupabase()
-    await sb.from('woo_credentials').delete().eq('id', 1)
+    await sb.from('store_settings').delete().eq('id', 1)
   } catch {
     /* ignore */
   }
