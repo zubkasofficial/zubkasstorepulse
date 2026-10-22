@@ -9,6 +9,25 @@ import { playOrderChime, unlockAudio } from '@/lib/alertSound'
 import { getAppMode, setAppMode as persistAppMode, saveOperationalModeToCloud, fetchOperationalModeFromCloud, type AppMode } from '@/lib/appMode'
 import { fetchStandaloneProducts, fetchStandaloneOrders } from '@/lib/standaloneDb'
 
+const SEEN_ORDERS_KEY = 'zubkas_seen_order_ids'
+const SEEN_MAX = 500
+
+function loadSeenOrderIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(SEEN_ORDERS_KEY)
+    if (raw) return new Set(JSON.parse(raw) as string[])
+  } catch { /* ignore */ }
+  return new Set()
+}
+
+function persistSeenOrderIds(ids: Set<string>): void {
+  try {
+    const arr = Array.from(ids)
+    const trimmed = arr.length > SEEN_MAX ? arr.slice(arr.length - SEEN_MAX) : arr
+    localStorage.setItem(SEEN_ORDERS_KEY, JSON.stringify(trimmed))
+  } catch { /* ignore */ }
+}
+
 type Toast = { id: number; type: 'success' | 'error'; message: string }
 
 type NewOrderAlert = {
@@ -76,7 +95,7 @@ export function WooProvider({ children }: { children: ReactNode }) {
     }
   })
   const [newOrderAlerts, setNewOrderAlerts] = useState<NewOrderAlert[]>([])
-  const knownOrderIdsRef = useRef<Set<string>>(new Set())
+  const seenOrderIdsRef = useRef<Set<string>>(loadSeenOrderIds())
   const firstLoadRef = useRef(true)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -105,6 +124,8 @@ export function WooProvider({ children }: { children: ReactNode }) {
 
   const dismissNewOrderAlert = useCallback((id: string) => {
     setNewOrderAlerts((prev) => prev.filter((a) => a.id !== id))
+    seenOrderIdsRef.current.add(id)
+    persistSeenOrderIds(seenOrderIdsRef.current)
   }, [])
 
   const isStandalone = appMode === 'standalone'
@@ -117,26 +138,25 @@ export function WooProvider({ children }: { children: ReactNode }) {
           setProducts(p)
           setCustomers([])
           setSalesReport(null)
-          setOrders((prev) => {
-            const prevIds = new Set(prev.map((ord) => ord.id))
-            const newOnes = o.filter((ord) => !prevIds.has(ord.id))
-            if (newOnes.length > 0 && !firstLoadRef.current) {
-              for (const n of newOnes) {
+          setOrders(o)
+          if (firstLoadRef.current) {
+            for (const ord of o) seenOrderIdsRef.current.add(ord.id)
+            persistSeenOrderIds(seenOrderIdsRef.current)
+            firstLoadRef.current = false
+          } else {
+            const fresh = o.filter((ord) => !seenOrderIdsRef.current.has(ord.id))
+            if (fresh.length > 0) {
+              for (const n of fresh) {
+                seenOrderIdsRef.current.add(n.id)
                 setNewOrderAlerts((alerts) => [
                   ...alerts,
                   { id: n.id, total: n.total, customer: n.customer, timestamp: Date.now() },
                 ])
               }
+              persistSeenOrderIds(seenOrderIdsRef.current)
               if (soundAlertsOn) playOrderChime()
             }
-            if (firstLoadRef.current) {
-              knownOrderIdsRef.current = new Set(o.map((ord) => ord.id))
-              firstLoadRef.current = false
-            } else {
-              for (const n of newOnes) knownOrderIdsRef.current.add(n.id)
-            }
-            return o
-          })
+          }
         })
         .catch((err) => {
           pushToast('error', `Failed to load cloud data: ${err instanceof Error ? err.message : 'Unknown error'}`)
@@ -160,27 +180,25 @@ export function WooProvider({ children }: { children: ReactNode }) {
         setCustomers(c)
         setSalesReport(s)
 
-        setOrders((prev) => {
-          const prevIds = new Set(prev.map((ord) => ord.id))
-          const newOnes = o.filter((ord) => !prevIds.has(ord.id))
-          if (newOnes.length > 0 && !firstLoadRef.current) {
-            for (const n of newOnes) {
+        setOrders(o)
+        if (firstLoadRef.current) {
+          for (const ord of o) seenOrderIdsRef.current.add(ord.id)
+          persistSeenOrderIds(seenOrderIdsRef.current)
+          firstLoadRef.current = false
+        } else {
+          const fresh = o.filter((ord) => !seenOrderIdsRef.current.has(ord.id))
+          if (fresh.length > 0) {
+            for (const n of fresh) {
+              seenOrderIdsRef.current.add(n.id)
               setNewOrderAlerts((alerts) => [
                 ...alerts,
                 { id: n.id, total: n.total, customer: n.customer, timestamp: Date.now() },
               ])
             }
+            persistSeenOrderIds(seenOrderIdsRef.current)
             if (soundAlertsOn) playOrderChime()
           }
-          // Track known IDs
-          if (firstLoadRef.current) {
-            knownOrderIdsRef.current = new Set(o.map((ord) => ord.id))
-            firstLoadRef.current = false
-          } else {
-            for (const n of newOnes) knownOrderIdsRef.current.add(n.id)
-          }
-          return o
-        })
+        }
       })
       .catch((err) => {
         pushToast('error', `Failed to sync live data: ${err instanceof Error ? err.message : 'Unknown error'}`)
@@ -212,7 +230,6 @@ export function WooProvider({ children }: { children: ReactNode }) {
     setProducts([])
     setCustomers([])
     setSalesReport(null)
-    knownOrderIdsRef.current = new Set()
     firstLoadRef.current = true
     setNewOrderAlerts([])
     pushToast('success', 'Disconnected from store.')
@@ -221,14 +238,12 @@ export function WooProvider({ children }: { children: ReactNode }) {
   const setAppMode = useCallback((mode: AppMode) => {
     persistAppMode(mode)
     setAppModeState(mode)
-    knownOrderIdsRef.current = new Set()
     firstLoadRef.current = true
   }, [])
 
   const saveOperationalMode = useCallback(async (mode: AppMode) => {
     persistAppMode(mode)
     setAppModeState(mode)
-    knownOrderIdsRef.current = new Set()
     firstLoadRef.current = true
     await saveOperationalModeToCloud(mode)
   }, [])
@@ -255,7 +270,6 @@ export function WooProvider({ children }: { children: ReactNode }) {
       const detail = (e as CustomEvent<AppMode>).detail
       if (detail === 'standalone' || detail === 'woo') {
         setAppModeState(detail)
-        knownOrderIdsRef.current = new Set()
         firstLoadRef.current = true
       }
     }
