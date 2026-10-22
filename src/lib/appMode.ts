@@ -25,33 +25,23 @@ export function setAppMode(mode: AppMode): void {
 }
 
 export async function saveOperationalModeToCloud(mode: AppMode): Promise<void> {
-  try {
-    const sb = getSupabase()
-    const { data: existing, error: selectError } = await sb
+  const sb = getSupabase()
+  const { data: existing, error: selectError } = await sb
+    .from('store_settings')
+    .select('id')
+    .maybeSingle()
+  if (selectError) throw selectError
+  if (existing?.id) {
+    const { error: updateError } = await sb
       .from('store_settings')
-      .select('id')
-      .maybeSingle()
-    if (selectError) {
-      console.error('[store_settings] operational mode select error:', selectError.message, selectError.code)
-    }
-    if (existing?.id) {
-      const { error: updateError } = await sb
-        .from('store_settings')
-        .update({ operational_mode: mode, updated_at: new Date().toISOString() })
-        .eq('id', existing.id)
-      if (updateError) {
-        console.error('[store_settings] operational mode update error:', updateError.message, updateError.code)
-      }
-    } else {
-      const { error: insertError } = await sb
-        .from('store_settings')
-        .insert([{ operational_mode: mode }])
-      if (insertError) {
-        console.error('[store_settings] operational mode insert error:', insertError.message, insertError.code)
-      }
-    }
-  } catch (err) {
-    console.error('[store_settings] saveOperationalModeToCloud exception:', err)
+      .update({ operational_mode: mode, updated_at: new Date().toISOString() })
+      .eq('id', existing.id)
+    if (updateError) throw updateError
+  } else {
+    const { error: insertError } = await sb
+      .from('store_settings')
+      .insert([{ operational_mode: mode }])
+    if (insertError) throw insertError
   }
 }
 

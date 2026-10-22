@@ -96,13 +96,20 @@ function ProfileSecurityTab() {
     setModeSaved(false)
   }
 
+  const [modeError, setModeError] = useState('')
+
   const handleModeSave = async () => {
     if (modeSaving) return
+    setModeError('')
     setModeSaving(true)
-    await saveOperationalMode(selectedMode)
+    try {
+      await saveOperationalMode(selectedMode)
+      setModeSaved(true)
+      window.setTimeout(() => setModeSaved(false), 2500)
+    } catch (err) {
+      setModeError(err instanceof Error ? err.message : 'Failed to save operational mode.')
+    }
     setModeSaving(false)
-    setModeSaved(true)
-    window.setTimeout(() => setModeSaved(false), 2500)
   }
 
   // Business profile
@@ -293,6 +300,11 @@ function ProfileSecurityTab() {
             {modeSaved && (
               <span className="flex items-center gap-1.5 text-sm text-green-600 animate-fade-in">
                 <CheckCircle2 className="h-4 w-4" /> Operational mode saved and synced!
+              </span>
+            )}
+            {modeError && (
+              <span className="flex items-center gap-1.5 text-sm text-red-600 animate-fade-in">
+                <AlertCircle className="h-4 w-4" /> {modeError}
               </span>
             )}
           </div>
