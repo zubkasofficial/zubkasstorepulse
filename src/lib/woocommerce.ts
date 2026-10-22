@@ -171,6 +171,7 @@ export async function saveConnectionToCloud(data: WooConnection): Promise<void> 
           woocommerce_url: data.storeUrl,
           consumer_key: data.consumerKey,
           consumer_secret: data.consumerSecret,
+          is_connected: true,
           updated_at: new Date().toISOString(),
         })
         .eq('id', existing.id)
@@ -181,7 +182,7 @@ export async function saveConnectionToCloud(data: WooConnection): Promise<void> 
       const { error: insertError } = await sb
         .from('store_settings')
         .insert([
-          { woocommerce_url: data.storeUrl, consumer_key: data.consumerKey, consumer_secret: data.consumerSecret }
+          { woocommerce_url: data.storeUrl, consumer_key: data.consumerKey, consumer_secret: data.consumerSecret, is_connected: true }
         ])
       if (insertError) {
         console.error('[store_settings] insert error:', insertError.message, insertError.code)
@@ -202,6 +203,7 @@ export async function fetchConnectionFromCloud(): Promise<WooConnection | null> 
     }
     if (!data) return null
     if (!data.woocommerce_url || !data.consumer_key) return null
+    if (data.is_connected === false) return null
     return {
       storeUrl: data.woocommerce_url,
       consumerKey: data.consumer_key,
@@ -217,9 +219,18 @@ export async function fetchConnectionFromCloud(): Promise<WooConnection | null> 
 export async function clearConnectionFromCloud(): Promise<void> {
   try {
     const sb = getSupabase()
-    const { error } = await sb.from('store_settings').delete().eq('id', 1)
+    const { error } = await sb
+      .from('store_settings')
+      .update({
+        woocommerce_url: '',
+        consumer_key: '',
+        consumer_secret: '',
+        is_connected: false,
+        updated_at: new Date().toISOString(),
+      })
+      .neq('id', 0)
     if (error) {
-      console.error('[store_settings] delete error:', error.message, error.code)
+      console.error('[store_settings] disconnect update error:', error.message, error.code)
     }
   } catch (err) {
     console.error('[store_settings] clearConnectionFromCloud exception:', err)
