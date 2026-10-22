@@ -71,6 +71,7 @@ type WooContextValue = {
   // new order alerts
   newOrderAlerts: NewOrderAlert[]
   dismissNewOrderAlert: (id: string) => void
+  clearAllNewOrderAlerts: () => void
 }
 
 const POLL_INTERVAL = 30000
@@ -127,6 +128,12 @@ export function WooProvider({ children }: { children: ReactNode }) {
     seenOrderIdsRef.current.add(id)
     persistSeenOrderIds(seenOrderIdsRef.current)
   }, [])
+
+  const clearAllNewOrderAlerts = useCallback(() => {
+    setNewOrderAlerts([])
+    for (const a of newOrderAlerts) seenOrderIdsRef.current.add(a.id)
+    persistSeenOrderIds(seenOrderIdsRef.current)
+  }, [newOrderAlerts])
 
   const isStandalone = appMode === 'standalone'
 
@@ -390,6 +397,7 @@ export function WooProvider({ children }: { children: ReactNode }) {
         toggleSoundAlerts,
         newOrderAlerts,
         dismissNewOrderAlert,
+        clearAllNewOrderAlerts,
       }}
     >
       {children}

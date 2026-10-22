@@ -23,7 +23,7 @@ const NAV_ITEMS: { key: NavKey; to: string; label: string; icon: React.Component
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { user, logout, permissions, role } = useAuth()
-  const { isConnected, isLive, toasts, dismissToast, soundAlertsOn, toggleSoundAlerts, newOrderAlerts, dismissNewOrderAlert } = useWoo()
+  const { isConnected, isLive, toasts, dismissToast, soundAlertsOn, toggleSoundAlerts, newOrderAlerts, dismissNewOrderAlert, clearAllNewOrderAlerts } = useWoo()
   const navigate = useNavigate()
   const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -230,6 +230,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                         <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand">{unreadCount} new</span>
                       )}
                     </div>
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={clearAllNewOrderAlerts}
+                        className="border-b border-slate-100 px-4 py-2 text-xs font-semibold text-brand transition hover:bg-brand-50"
+                      >
+                        Clear All
+                      </button>
+                    )}
                     <div className="max-h-72 overflow-y-auto">
                       {unreadCount > 0 ? (
                         newOrderAlerts.map((a) => (
