@@ -78,6 +78,9 @@ export default function ProductsPage() {
         stockQuantity: data.stock,
         imageUrl: data.imageUrl,
         description: data.description,
+        attributes: data.attributes,
+        variations: data.variations,
+        type: data.type,
       }
       try {
         if (id) {

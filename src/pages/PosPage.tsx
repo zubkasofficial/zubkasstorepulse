@@ -5,8 +5,9 @@ import { useWoo } from '@/auth/WooContext'
 import { useAuth } from '@/auth/AuthContext'
 import { createPosOrder, type CreatePosOrderInput, type CreatedPosOrder } from '@/lib/woocommerce'
 import { createStandaloneSale } from '@/lib/standaloneDb'
-import { formatCurrency, type Product, type Customer } from '@/data/mockData'
+import { formatCurrency, type Product, type Customer, type ProductVariation } from '@/data/mockData'
 import ThermalReceiptModal from '@/components/ThermalReceiptModal'
+import VariationPickerModal from '@/components/VariationPickerModal'
 import { printThermalReceipt, type ReceiptData, type RollSize } from '@/lib/thermalReceipt'
 import { getSupabase } from '@/lib/supabase'
 import { incrementCouponUsage } from '@/lib/coupons'
@@ -111,6 +112,7 @@ export default function PosPage() {
   const [cart, setCart] = useState<CartLine[]>([])
   const [flashId, setFlashId] = useState<string | null>(null)
   const [mobileCartOpen, setMobileCartOpen] = useState(false)
+  const [variationProduct, setVariationProduct] = useState<Product | null>(null)
 
   // Customer
   const [customerMode, setCustomerMode] = useState<'walkin' | 'named'>('walkin')
@@ -266,7 +268,15 @@ export default function PosPage() {
   const tax = Math.round(taxableAmount * TAX_RATE)
   const total = taxableAmount + tax
 
+  const isVariableProduct = (product: Product): boolean => {
+    return product.type === 'variable' || (product.variations.length > 0 && product.attributes.some((a) => a.variation))
+  }
+
   const addToCart = (product: Product) => {
+    if (isVariableProduct(product)) {
+      setVariationProduct(product)
+      return
+    }
     setFlashId(product.id)
     window.setTimeout(() => setFlashId((cur) => (cur === product.id ? null : cur)), 400)
     setCart((prev) => {
@@ -276,6 +286,21 @@ export default function PosPage() {
       }
       return [...prev, { productId: product.id, name: product.name, price: product.salePrice ?? product.price, quantity: 1 }]
     })
+  }
+
+  const addVariationToCart = (variation: ProductVariation, price: number, name: string) => {
+    if (!variationProduct) return
+    const cartId = `${variationProduct.id}-${variation.id}`
+    setFlashId(variationProduct.id)
+    window.setTimeout(() => setFlashId((cur) => (cur === variationProduct.id ? null : cur)), 400)
+    setCart((prev) => {
+      const existing = prev.find((l) => l.productId === cartId)
+      if (existing) {
+        return prev.map((l) => (l.productId === cartId ? { ...l, quantity: l.quantity + 1 } : l))
+      }
+      return [...prev, { productId: cartId, name, price, quantity: 1 }]
+    })
+    setVariationProduct(null)
   }
 
   const incrementQty = (productId: string) => {
@@ -506,12 +531,29 @@ export default function PosPage() {
                       <div className="flex flex-1 flex-col p-3">
                         <p className="line-clamp-2 text-sm font-semibold text-slate-900">{p.name}</p>
                         <p className="mt-0.5 text-xs text-slate-400">SKU: {p.sku}</p>
-                        <div className="mt-auto pt-2">
-                          <span className="font-display text-lg font-bold text-brand">
-                            {formatCurrency(p.salePrice ?? p.price)}
+                        {isVariableProduct(p) && (
+                          <span className="mt-1 inline-flex w-fit rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand">
+                            {p.variations.length} variation{p.variations.length !== 1 ? 's' : ''}
                           </span>
-                          {p.salePrice !== null && (
-                            <span className="ml-1.5 text-xs text-slate-400 line-through">{formatCurrency(p.price)}</span>
+                        )}
+                        <div className="mt-auto pt-2">
+                          {isVariableProduct(p) ? (
+                            <span className="font-display text-sm font-bold text-slate-700">From {formatCurrency(
+                              p.variations.reduce((min, v) => {
+                                const vp = Number(v.price) || 0
+                                const vs = v.salePrice ? Number(v.salePrice) : null
+                                return Math.min(min, vs ?? vp)
+                              }, Infinity)
+                            )}</span>
+                          ) : (
+                            <>
+                              <span className="font-display text-lg font-bold text-brand">
+                                {formatCurrency(p.salePrice ?? p.price)}
+                              </span>
+                              {p.salePrice !== null && (
+                                <span className="ml-1.5 text-xs text-slate-400 line-through">{formatCurrency(p.price)}</span>
+                              )}
+                            </>
                           )}
                         </div>
                       </div>
@@ -1080,6 +1122,14 @@ export default function PosPage() {
           data={buildThermalData()}
           defaultRoll={rollSize}
           onClose={() => setShowThermalModal(false)}
+        />
+      )}
+
+      {variationProduct && (
+        <VariationPickerModal
+          product={variationProduct}
+          onClose={() => setVariationProduct(null)}
+          onSelect={addVariationToCart}
         />
       )}
     </AppLayout>

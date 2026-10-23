@@ -18,6 +18,8 @@ export type ProductRow = {
   image_url: string | null
   images: ProductImage[] | string | null
   description: string | null
+  attributes: Array<{ id: number; name: string; position: number; visible: boolean; variation: boolean; options: string[] }> | null
+  variations: Array<{ id: string; sku: string; price: string; salePrice: string | null; attributes: Array<{ name: string; option: string }> }> | null
   created_at: string
   updated_at: string
 }
@@ -85,7 +87,7 @@ function mapProductRow(r: ProductRow): Product {
     imageUrl: extractImageSrc(r),
     description: r.description ?? '',
     fullDescription: r.description ?? '',
-    type: 'simple',
+    type: (r.variations && Array.isArray(r.variations) && r.variations.length > 0) ? 'variable' : 'simple',
     virtual: false,
     downloadable: false,
     manageStock: true,
@@ -100,8 +102,8 @@ function mapProductRow(r: ProductRow): Product {
     downloads: [],
     downloadLimit: 0,
     downloadExpiry: 0,
-    attributes: [],
-    variations: [],
+    attributes: Array.isArray(r.attributes) ? r.attributes : [],
+    variations: Array.isArray(r.variations) ? r.variations : [],
     tags: [],
   }
 }
@@ -158,6 +160,9 @@ export type StandaloneProductInput = {
   stockQuantity: number
   imageUrl: string
   description: string
+  attributes?: Array<{ id: number; name: string; position: number; visible: boolean; variation: boolean; options: string[] }>
+  variations?: Array<{ id: string; sku: string; price: string; salePrice: string | null; attributes: Array<{ name: string; option: string }> }>
+  type?: 'simple' | 'variable'
 }
 
 export async function createStandaloneProduct(input: StandaloneProductInput): Promise<Product> {
@@ -175,6 +180,8 @@ export async function createStandaloneProduct(input: StandaloneProductInput): Pr
     image_url: input.imageUrl.trim() || null,
     images: input.imageUrl.trim() ? [{ src: input.imageUrl.trim() }] : [],
     description: input.description.trim(),
+    attributes: input.attributes ?? [],
+    variations: input.variations ?? [],
   }
   const { data, error } = await sb.from('products').insert(row).select('*').single()
   if (error) throw new Error(error.message)
@@ -204,6 +211,8 @@ export async function updateStandaloneProduct(id: string, input: Partial<Standal
     patch.images = url ? [{ src: url }] : []
   }
   if (input.description !== undefined) patch.description = input.description.trim()
+  if (input.attributes !== undefined) patch.attributes = input.attributes
+  if (input.variations !== undefined) patch.variations = input.variations
   const { data, error } = await sb.from('products').update(patch).eq('id', id).select('*').single()
   if (error) throw new Error(error.message)
   return mapProductRow(data as ProductRow)
