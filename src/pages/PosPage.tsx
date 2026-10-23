@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { Search, Plus, Minus, Trash2, X, User, Phone, Calculator, Wallet, CreditCard, QrCode, Printer, CircleCheck as CheckCircle2, ShoppingBag, Package, Percent, IndianRupee, RefreshCw, Receipt as ReceiptIcon, Ticket, Tag } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
 import { useWoo } from '@/auth/WooContext'
@@ -28,10 +28,48 @@ async function fetchActiveCoupons(): Promise<Coupon[]> {
   try {
     const { data, error } = await sb
       .from('coupons')
-      .select('id, code, discount_type, amount, minimum_amount, usage_limit, usage_count, date_expires')
+      .select('id, code, discount_type, amount, minimum_amount, usage_limit, usage_count, date_expires, is_active')
       .order('created_at', { ascending: false })
-    if (error || !data) return []
-    return (data as Array<{ id: string; code: string; discount_type: string; amount: number; minimum_amount: number; usage_limit: number; usage_count: number; date_expires: string | null }>).map((r) => ({
+    if (error) {
+      console.error('[pos] coupon fetch error:', error.message)
+      return []
+    }
+    if (!data) return []
+    return (data as Array<{ id: string; code: string; discount_type: string; amount: number; minimum_amount: number; usage_limit: number; usage_count: number; date_expires: string | null; is_active: boolean }>)
+      .filter((r) => r.is_active !== false)
+      .map((r) => ({
+        id: r.id,
+        code: r.code,
+        discountType: r.discount_type === 'percent' ? 'percent' : 'flat',
+        amount: Number(r.amount),
+        minimumAmount: Number(r.minimum_amount),
+        usageLimit: r.usage_limit,
+        usageCount: r.usage_count,
+        dateExpires: r.date_expires,
+      }))
+  } catch (err) {
+    console.error('[pos] coupon fetch exception:', err instanceof Error ? err.message : err)
+    return []
+  }
+}
+
+async function fetchCouponByCode(code: string): Promise<Coupon | null> {
+  const sb = getSupabase()
+  if (!sb) return null
+  try {
+    const { data, error } = await sb
+      .from('coupons')
+      .select('id, code, discount_type, amount, minimum_amount, usage_limit, usage_count, date_expires, is_active')
+      .ilike('code', code)
+      .maybeSingle()
+    if (error) {
+      console.error('[pos] coupon lookup error:', error.message)
+      return null
+    }
+    if (!data) return null
+    const r = data as { id: string; code: string; discount_type: string; amount: number; minimum_amount: number; usage_limit: number; usage_count: number; date_expires: string | null; is_active: boolean }
+    if (r.is_active === false) return null
+    return {
       id: r.id,
       code: r.code,
       discountType: r.discount_type === 'percent' ? 'percent' : 'flat',
@@ -40,9 +78,10 @@ async function fetchActiveCoupons(): Promise<Coupon[]> {
       usageLimit: r.usage_limit,
       usageCount: r.usage_count,
       dateExpires: r.date_expires,
-    }))
-  } catch {
-    return []
+    }
+  } catch (err) {
+    console.error('[pos] coupon lookup exception:', err instanceof Error ? err.message : err)
+    return null
   }
 }
 
@@ -109,9 +148,20 @@ export default function PosPage() {
   const [couponInput, setCouponInput] = useState('')
   const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null)
   const [couponMessage, setCouponMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const couponsLoadedRef = useRef(false)
 
   useEffect(() => {
+    if (couponsLoadedRef.current) return
+    couponsLoadedRef.current = true
     fetchActiveCoupons().then(setCoupons).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const onFocus = () => {
+      fetchActiveCoupons().then(setCoupons).catch(() => {})
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
   }, [])
 
   // Payment
@@ -162,10 +212,14 @@ export default function PosPage() {
     return Math.round((subtotal * Math.min(val, 100)) / 100)
   }, [discountValue, discountType, subtotal])
 
-  const applyCoupon = useCallback(() => {
-    const code = couponInput.trim().toUpperCase()
+  const applyCoupon = useCallback(async () => {
+    const code = couponInput.trim()
     if (!code) return
-    const coupon = coupons.find((c) => c.code.toUpperCase() === code)
+    const normalized = code.toLowerCase()
+    let coupon: Coupon | undefined = coupons.find((c) => c.code.toLowerCase() === normalized)
+    if (!coupon) {
+      coupon = await fetchCouponByCode(code) ?? undefined
+    }
     if (!coupon) {
       setAppliedCoupon(null)
       setCouponMessage({ type: 'error', text: 'Invalid coupon code.' })
@@ -176,10 +230,13 @@ export default function PosPage() {
       setCouponMessage({ type: 'error', text: 'This coupon has reached its usage limit.' })
       return
     }
-    if (coupon.dateExpires && new Date(coupon.dateExpires) < new Date()) {
-      setAppliedCoupon(null)
-      setCouponMessage({ type: 'error', text: 'This coupon has expired.' })
-      return
+    if (coupon.dateExpires) {
+      const expiry = new Date(coupon.dateExpires + 'T23:59:59')
+      if (expiry < new Date()) {
+        setAppliedCoupon(null)
+        setCouponMessage({ type: 'error', text: 'This coupon has expired.' })
+        return
+      }
     }
     if (subtotal < coupon.minimumAmount) {
       setAppliedCoupon(null)

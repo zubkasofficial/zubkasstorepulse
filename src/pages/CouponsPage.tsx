@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Ticket, Plus, RefreshCw, Search, Trash2, Copy, Pencil, X, Loader as Loader2,
-  Percent, IndianRupee, Calendar, TrendingDown,
+  Percent, IndianRupee, Calendar, TrendingDown, Power,
   CircleCheck as CheckCircle2, Sparkles, Tag,
 } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
@@ -13,7 +13,7 @@ import {
   type Coupon, type CouponDiscountType, type CreateCouponInput,
 } from '@/lib/woocommerce'
 import {
-  fetchCouponsFromSupabase, insertCouponToSupabase, deleteCouponFromSupabase,
+  fetchCouponsFromSupabase, insertCouponToSupabase, deleteCouponFromSupabase, toggleCouponActiveInSupabase,
 } from '@/lib/coupons'
 import { formatCurrency } from '@/data/mockData'
 
@@ -35,14 +35,18 @@ function isExhausted(coupon: Coupon): boolean {
 
 export default function CouponsPage() {
   const { connection, pushToast } = useWoo()
+  const isConnected = !!connection
   const [coupons, setCoupons] = useState<Coupon[]>([])
   const [query, setQuery] = useState('')
   const [fetching, setFetching] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Coupon | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const loadingRef = useRef(false)
 
   const loadCoupons = async () => {
+    if (loadingRef.current) return
+    loadingRef.current = true
     setFetching(true)
     try {
       if (connection) {
@@ -61,7 +65,15 @@ export default function CouponsPage() {
             freeShipping: c.freeShipping,
           })
         }
-        setCoupons(wooData)
+        const refreshedSupa = await fetchCouponsFromSupabase()
+        const supaByCode = new Map(refreshedSupa.map((c) => [c.code.toUpperCase(), c]))
+        const merged = wooData.map((w) => {
+          const s = supaByCode.get(w.code.toUpperCase())
+          return s ? { ...w, isActive: s.isActive } : w
+        })
+        const wooCodes = new Set(wooData.map((c) => c.code.toUpperCase()))
+        const supaOnly = refreshedSupa.filter((c) => !wooCodes.has(c.code.toUpperCase()))
+        setCoupons([...merged, ...supaOnly])
       } else {
         const supaData = await fetchCouponsFromSupabase()
         setCoupons(supaData)
@@ -72,20 +84,21 @@ export default function CouponsPage() {
       setCoupons(supaData)
     } finally {
       setFetching(false)
+      loadingRef.current = false
     }
   }
 
   useEffect(() => {
     loadCoupons()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection])
+  }, [isConnected])
 
   const filtered = useMemo(() => {
     return coupons.filter((c) => c.code.toLowerCase().includes(query.toLowerCase()))
   }, [coupons, query])
 
-  const activeCount = coupons.filter((c) => !isExpired(c) && !isExhausted(c)).length
-  const expiredCount = coupons.filter((c) => isExpired(c)).length
+  const activeCount = coupons.filter((c) => c.isActive !== false && !isExpired(c) && !isExhausted(c)).length
+  const inactiveCount = coupons.filter((c) => c.isActive === false).length
   const totalRedeemed = coupons.reduce((sum, c) => sum + (c.amount * c.usageCount), 0)
 
   const handleCopyCode = (code: string) => {
@@ -93,6 +106,18 @@ export default function CouponsPage() {
       () => pushToast('success', `Coupon code "${code}" copied to clipboard.`),
       () => pushToast('error', 'Unable to copy to clipboard.'),
     )
+  }
+
+  const handleToggleActive = async (coupon: Coupon) => {
+    const newActive = coupon.isActive === false ? true : false
+    setCoupons((prev) => prev.map((c) => (c.id === coupon.id ? { ...c, isActive: newActive } : c)))
+    const ok = await toggleCouponActiveInSupabase(coupon.code, newActive)
+    if (ok) {
+      pushToast('success', `Coupon "${coupon.code}" ${newActive ? 'activated' : 'deactivated'}.`)
+    } else {
+      setCoupons((prev) => prev.map((c) => (c.id === coupon.id ? { ...c, isActive: !newActive } : c)))
+      pushToast('error', `Failed to ${newActive ? 'activate' : 'deactivate'} coupon.`)
+    }
   }
 
   const handleDelete = async () => {
@@ -116,22 +141,26 @@ export default function CouponsPage() {
   const handleCreate = async (input: CreateCouponInput) => {
     try {
       let created: Coupon
+      let alreadyInSupabase = false
       if (connection) {
         created = await createCoupon(connection, input)
       } else {
         const supaCreated = await insertCouponToSupabase(input)
         if (!supaCreated) throw new Error('Failed to create coupon in database.')
         created = supaCreated
+        alreadyInSupabase = true
       }
-      await insertCouponToSupabase({
-        code: created.code,
-        discountType: created.discountType,
-        amount: created.amount,
-        minimumSpend: created.minimumSpend,
-        usageLimit: created.usageLimit,
-        expiryDate: created.expiryDate,
-        freeShipping: created.freeShipping,
-      })
+      if (!alreadyInSupabase) {
+        await insertCouponToSupabase({
+          code: created.code,
+          discountType: created.discountType,
+          amount: created.amount,
+          minimumSpend: created.minimumSpend,
+          usageLimit: created.usageLimit,
+          expiryDate: created.expiryDate,
+          freeShipping: created.freeShipping,
+        })
+      }
       setCoupons((prev) => {
         if (prev.some((c) => c.code.toUpperCase() === created.code.toUpperCase())) return prev
         return [created, ...prev]
@@ -174,7 +203,7 @@ export default function CouponsPage() {
         <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <SummaryCard label="Active Coupons" value={activeCount.toString()} icon={Tag} accent="green" />
           <SummaryCard label="Total Discount Redeemed" value={formatCurrency(totalRedeemed)} icon={TrendingDown} accent="brand" />
-          <SummaryCard label="Expired Coupons" value={expiredCount.toString()} icon={Calendar} accent="amber" />
+          <SummaryCard label="Inactive Coupons" value={inactiveCount.toString()} icon={Calendar} accent="amber" />
         </div>
 
         {/* Toolbar */}
@@ -224,19 +253,25 @@ export default function CouponsPage() {
                     {filtered.map((c) => {
                       const expired = isExpired(c)
                       const exhausted = isExhausted(c)
+                      const inactive = c.isActive === false
                       return (
-                        <tr key={c.id} className="transition hover:bg-slate-50/60">
+                        <tr key={c.id} className={`transition hover:bg-slate-50/60 ${inactive ? 'opacity-60' : ''}`}>
                           <td className="py-3.5 pr-4">
                             <div className="flex items-center gap-2">
-                              <span className="rounded-lg bg-brand-50 px-2.5 py-1 font-mono text-sm font-bold text-brand">
+                              <span className={`rounded-lg px-2.5 py-1 font-mono text-sm font-bold ${inactive ? 'bg-slate-100 text-slate-400' : 'bg-brand-50 text-brand'}`}>
                                 {c.code}
                               </span>
+                              {inactive && (
+                                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-500">
+                                  Inactive
+                                </span>
+                              )}
                               {expired && (
                                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
                                   Expired
                                 </span>
                               )}
-                              {!expired && exhausted && (
+                              {!expired && !inactive && exhausted && (
                                 <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
                                   Exhausted
                                 </span>
@@ -264,6 +299,13 @@ export default function CouponsPage() {
                           </td>
                           <td className="py-3.5 pr-4">
                             <div className="flex items-center justify-end gap-1">
+                              <button
+                                onClick={() => handleToggleActive(c)}
+                                aria-label={inactive ? 'Activate coupon' : 'Deactivate coupon'}
+                                className={`rounded-lg p-1.5 transition hover:bg-slate-100 ${inactive ? 'text-slate-300 hover:text-green-600' : 'text-green-600 hover:text-green-700'}`}
+                              >
+                                <Power className="h-4 w-4" />
+                              </button>
                               <button
                                 onClick={() => handleCopyCode(c.code)}
                                 aria-label="Copy code"
@@ -299,13 +341,28 @@ export default function CouponsPage() {
                 {filtered.map((c) => {
                   const expired = isExpired(c)
                   const exhausted = isExhausted(c)
+                  const inactive = c.isActive === false
                   return (
-                    <div key={c.id} className="rounded-xl border border-slate-100 p-3.5">
+                    <div key={c.id} className={`rounded-xl border border-slate-100 p-3.5 ${inactive ? 'opacity-60' : ''}`}>
                       <div className="flex items-center justify-between">
-                        <span className="rounded-lg bg-brand-50 px-2.5 py-1 font-mono text-sm font-bold text-brand">
-                          {c.code}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className={`rounded-lg px-2.5 py-1 font-mono text-sm font-bold ${inactive ? 'bg-slate-100 text-slate-400' : 'bg-brand-50 text-brand'}`}>
+                            {c.code}
+                          </span>
+                          {inactive && (
+                            <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-500">
+                              Inactive
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleToggleActive(c)}
+                            aria-label={inactive ? 'Activate coupon' : 'Deactivate coupon'}
+                            className={`rounded-lg p-1.5 transition ${inactive ? 'text-slate-300' : 'text-green-600'}`}
+                          >
+                            <Power className="h-4 w-4" />
+                          </button>
                           <button
                             onClick={() => handleCopyCode(c.code)}
                             aria-label="Copy code"
@@ -336,7 +393,7 @@ export default function CouponsPage() {
                       <div className="mt-1.5 flex items-center justify-between text-xs text-slate-500">
                         <span>{c.usageCount} / {c.usageLimit > 0 ? c.usageLimit : '∞'} uses · {c.expiryDate || 'No expiry'}</span>
                         {expired && <span className="font-medium text-slate-500">Expired</span>}
-                        {!expired && exhausted && <span className="font-medium text-amber-700">Exhausted</span>}
+                        {!expired && !inactive && exhausted && <span className="font-medium text-amber-700">Exhausted</span>}
                       </div>
                     </div>
                   )

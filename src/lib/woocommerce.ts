@@ -741,6 +741,7 @@ export type Coupon = {
   usageCount: number
   expiryDate: string
   freeShipping: boolean
+  isActive?: boolean
 }
 
 export type WooCoupon = {
