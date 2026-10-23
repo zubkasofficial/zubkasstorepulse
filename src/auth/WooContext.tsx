@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   getConnection, saveConnection, clearConnection, testConnection,
   saveConnectionToCloud, fetchConnectionFromCloud, clearConnectionFromCloud,
@@ -391,7 +391,7 @@ export function WooProvider({ children }: { children: ReactNode }) {
 
   return (
     <WooContext.Provider
-      value={{
+      value={useMemo(() => ({
         connection,
         isConnected: !!connection,
         isLive: !!connection || isStandalone,
@@ -424,7 +424,14 @@ export function WooProvider({ children }: { children: ReactNode }) {
         newOrderAlerts,
         dismissNewOrderAlert,
         clearAllNewOrderAlerts,
-      }}
+      }), [
+        connection, connecting, connect, disconnect, appMode, isStandalone,
+        setAppMode, saveOperationalMode, orders, products, customers, salesReport,
+        loading, refresh, updateOrder, addProduct, updateProduct, removeProduct,
+        addCustomer, updateCustomer, removeCustomer, setCustomersState, toasts,
+        pushToast, dismissToast, soundAlertsOn, toggleSoundAlerts, newOrderAlerts,
+        dismissNewOrderAlert, clearAllNewOrderAlerts,
+      ])}
     >
       {children}
     </WooContext.Provider>

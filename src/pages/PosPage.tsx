@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Search, Plus, Minus, Trash2, X, User, Phone, Calculator, Wallet, CreditCard, QrCode, Printer, CircleCheck as CheckCircle2, ShoppingBag, Package, Percent, IndianRupee, RefreshCw, Receipt as ReceiptIcon } from 'lucide-react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
+import { Search, Plus, Minus, Trash2, X, User, Phone, Calculator, Wallet, CreditCard, QrCode, Printer, CircleCheck as CheckCircle2, ShoppingBag, Package, Percent, IndianRupee, RefreshCw, Receipt as ReceiptIcon, Ticket, Tag } from 'lucide-react'
 import AppLayout from '@/components/AppLayout'
 import { useWoo } from '@/auth/WooContext'
 import { useAuth } from '@/auth/AuthContext'
@@ -8,6 +8,43 @@ import { createStandaloneSale } from '@/lib/standaloneDb'
 import { formatCurrency, type Product, type Customer } from '@/data/mockData'
 import ThermalReceiptModal from '@/components/ThermalReceiptModal'
 import { printThermalReceipt, type ReceiptData, type RollSize } from '@/lib/thermalReceipt'
+import { getSupabase } from '@/lib/supabase'
+import { incrementCouponUsage } from '@/lib/coupons'
+
+type Coupon = {
+  id: string
+  code: string
+  discountType: 'percent' | 'flat'
+  amount: number
+  minimumAmount: number
+  usageLimit: number
+  usageCount: number
+  dateExpires: string | null
+}
+
+async function fetchActiveCoupons(): Promise<Coupon[]> {
+  const sb = getSupabase()
+  if (!sb) return []
+  try {
+    const { data, error } = await sb
+      .from('coupons')
+      .select('id, code, discount_type, amount, minimum_amount, usage_limit, usage_count, date_expires')
+      .order('created_at', { ascending: false })
+    if (error || !data) return []
+    return (data as Array<{ id: string; code: string; discount_type: string; amount: number; minimum_amount: number; usage_limit: number; usage_count: number; date_expires: string | null }>).map((r) => ({
+      id: r.id,
+      code: r.code,
+      discountType: r.discount_type === 'percent' ? 'percent' : 'flat',
+      amount: Number(r.amount),
+      minimumAmount: Number(r.minimum_amount),
+      usageLimit: r.usage_limit,
+      usageCount: r.usage_count,
+      dateExpires: r.date_expires,
+    }))
+  } catch {
+    return []
+  }
+}
 
 type CartLine = {
   productId: string
@@ -67,6 +104,16 @@ export default function PosPage() {
   const [discountType, setDiscountType] = useState<'flat' | 'percent'>('flat')
   const [discountValue, setDiscountValue] = useState('')
 
+  // Coupon
+  const [coupons, setCoupons] = useState<Coupon[]>([])
+  const [couponInput, setCouponInput] = useState('')
+  const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null)
+  const [couponMessage, setCouponMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+
+  useEffect(() => {
+    fetchActiveCoupons().then(setCoupons).catch(() => {})
+  }, [])
+
   // Payment
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash')
 
@@ -96,13 +143,12 @@ export default function PosPage() {
     return ['All', ...Array.from(cats)]
   }, [products])
 
-  const cartItemCount = cart.reduce((s, l) => s + l.quantity, 0)
+  const cartItemCount = useMemo(() => cart.reduce((s, l) => s + l.quantity, 0), [cart])
 
   const filtered = useMemo(() => {
+    const q = query.toLowerCase()
     return products.filter((p) => {
-      const matchesQuery =
-        p.name.toLowerCase().includes(query.toLowerCase()) ||
-        p.sku.toLowerCase().includes(query.toLowerCase())
+      const matchesQuery = !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q)
       const matchesCat = category === 'All' || p.category === category
       return matchesQuery && matchesCat
     })
@@ -116,7 +162,50 @@ export default function PosPage() {
     return Math.round((subtotal * Math.min(val, 100)) / 100)
   }, [discountValue, discountType, subtotal])
 
-  const taxableAmount = Math.max(subtotal - discountAmount, 0)
+  const applyCoupon = useCallback(() => {
+    const code = couponInput.trim().toUpperCase()
+    if (!code) return
+    const coupon = coupons.find((c) => c.code.toUpperCase() === code)
+    if (!coupon) {
+      setAppliedCoupon(null)
+      setCouponMessage({ type: 'error', text: 'Invalid coupon code.' })
+      return
+    }
+    if (coupon.usageLimit > 0 && coupon.usageCount >= coupon.usageLimit) {
+      setAppliedCoupon(null)
+      setCouponMessage({ type: 'error', text: 'This coupon has reached its usage limit.' })
+      return
+    }
+    if (coupon.dateExpires && new Date(coupon.dateExpires) < new Date()) {
+      setAppliedCoupon(null)
+      setCouponMessage({ type: 'error', text: 'This coupon has expired.' })
+      return
+    }
+    if (subtotal < coupon.minimumAmount) {
+      setAppliedCoupon(null)
+      setCouponMessage({ type: 'error', text: `Minimum order amount ${formatCurrency(coupon.minimumAmount)} required.` })
+      return
+    }
+    setAppliedCoupon(coupon)
+    setCouponMessage({ type: 'success', text: `Coupon "${coupon.code}" applied!` })
+  }, [couponInput, coupons, subtotal])
+
+  const removeCoupon = useCallback(() => {
+    setAppliedCoupon(null)
+    setCouponInput('')
+    setCouponMessage(null)
+  }, [])
+
+  const couponDiscount = useMemo(() => {
+    if (!appliedCoupon || subtotal <= 0) return 0
+    if (appliedCoupon.discountType === 'percent') {
+      return Math.round((subtotal * Math.min(appliedCoupon.amount, 100)) / 100)
+    }
+    return Math.min(appliedCoupon.amount, subtotal)
+  }, [appliedCoupon, subtotal])
+
+  const totalDiscount = discountAmount + couponDiscount
+  const taxableAmount = Math.max(subtotal - totalDiscount, 0)
   const tax = Math.round(taxableAmount * TAX_RATE)
   const total = taxableAmount + tax
 
@@ -154,6 +243,9 @@ export default function PosPage() {
     setCustomerName('')
     setCustomerPhone('')
     setCustomerMode('walkin')
+    setAppliedCoupon(null)
+    setCouponInput('')
+    setCouponMessage(null)
   }
 
   const handleCompleteOrder = async () => {
@@ -165,7 +257,7 @@ export default function PosPage() {
       customerName: customerMode === 'named' ? customerName.trim() : 'Walk-in Customer',
       customerPhone: customerMode === 'named' ? customerPhone.trim() : '',
       subtotal,
-      discount: discountAmount,
+      discount: totalDiscount,
       tax,
       total,
       paymentMethod,
@@ -186,6 +278,9 @@ export default function PosPage() {
       setReceipt(created)
       setReceiptData({ ...orderData, paymentMethod })
       pushToast('success', `Order ${created.id} completed and synced to Cloud!`)
+      if (appliedCoupon) {
+        incrementCouponUsage(appliedCoupon.code).catch(() => {})
+      }
       refresh()
       if (autoPrint) {
         const thermalData: ReceiptData = {
@@ -524,6 +619,16 @@ export default function PosPage() {
                     </div>
                   </div>
 
+                  {/* Coupon */}
+                  <CouponInput
+                    couponInput={couponInput}
+                    setCouponInput={setCouponInput}
+                    appliedCoupon={appliedCoupon}
+                    couponMessage={couponMessage}
+                    onApply={applyCoupon}
+                    onRemove={removeCoupon}
+                  />
+
                   {/* Summary */}
                   <div className="space-y-1.5 rounded-xl bg-slate-50 p-4 text-sm">
                     <div className="flex justify-between text-slate-500">
@@ -534,6 +639,12 @@ export default function PosPage() {
                       <div className="flex justify-between text-green-600">
                         <span>Discount</span>
                         <span className="font-medium">-{formatCurrency(discountAmount)}</span>
+                      </div>
+                    )}
+                    {couponDiscount > 0 && (
+                      <div className="flex justify-between text-green-600">
+                        <span>Coupon ({appliedCoupon?.code})</span>
+                        <span className="font-medium">-{formatCurrency(couponDiscount)}</span>
                       </div>
                     )}
                     {tax > 0 && (
@@ -809,6 +920,16 @@ export default function PosPage() {
                   </div>
                 </div>
 
+                {/* Coupon */}
+                <CouponInput
+                  couponInput={couponInput}
+                  setCouponInput={setCouponInput}
+                  appliedCoupon={appliedCoupon}
+                  couponMessage={couponMessage}
+                  onApply={applyCoupon}
+                  onRemove={removeCoupon}
+                />
+
                 {/* Summary */}
                 <div className="space-y-1.5 rounded-xl bg-slate-50 p-4 text-sm">
                   <div className="flex justify-between text-slate-500">
@@ -819,6 +940,12 @@ export default function PosPage() {
                     <div className="flex justify-between text-green-600">
                       <span>Discount</span>
                       <span className="font-medium">-{formatCurrency(discountAmount)}</span>
+                    </div>
+                  )}
+                  {couponDiscount > 0 && (
+                    <div className="flex justify-between text-green-600">
+                      <span>Coupon ({appliedCoupon?.code})</span>
+                      <span className="font-medium">-{formatCurrency(couponDiscount)}</span>
                     </div>
                   )}
                   {tax > 0 && (
@@ -899,6 +1026,76 @@ export default function PosPage() {
         />
       )}
     </AppLayout>
+  )
+}
+
+/* ---------------- Coupon Input ---------------- */
+
+function CouponInput({
+  couponInput,
+  setCouponInput,
+  appliedCoupon,
+  couponMessage,
+  onApply,
+  onRemove,
+}: {
+  couponInput: string
+  setCouponInput: (v: string) => void
+  appliedCoupon: Coupon | null
+  couponMessage: { type: 'success' | 'error'; text: string } | null
+  onApply: () => void
+  onRemove: () => void
+}) {
+  if (appliedCoupon) {
+    return (
+      <div className="flex items-center justify-between rounded-xl border border-green-200 bg-green-50 px-3 py-2.5 animate-fade-in">
+        <div className="flex items-center gap-2">
+          <Ticket className="h-4 w-4 text-green-600" />
+          <div>
+            <p className="text-sm font-semibold text-green-700">{appliedCoupon.code}</p>
+            <p className="text-xs text-green-600">
+              {appliedCoupon.discountType === 'percent'
+                ? `${appliedCoupon.amount}% off`
+                : `${formatCurrency(appliedCoupon.amount)} off`}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={onRemove}
+          className="rounded-lg p-1.5 text-green-600 transition hover:bg-green-100"
+          aria-label="Remove coupon"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-1.5">
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Tag className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <input
+            value={couponInput}
+            onChange={(e) => setCouponInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onApply() } }}
+            placeholder="Coupon code"
+            className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
+          />
+        </div>
+        <button
+          onClick={onApply}
+          className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-800 active:scale-95"
+        >
+          Apply
+        </button>
+      </div>
+      {couponMessage && (
+        <p className={`text-xs ${couponMessage.type === 'success' ? 'text-green-600' : 'text-red-500'}`}>
+          {couponMessage.text}
+        </p>
+      )}
+    </div>
   )
 }
 

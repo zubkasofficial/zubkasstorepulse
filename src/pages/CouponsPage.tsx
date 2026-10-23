@@ -12,6 +12,9 @@ import {
   fetchCoupons, createCoupon, deleteCoupon, discountTypeLabel,
   type Coupon, type CouponDiscountType, type CreateCouponInput,
 } from '@/lib/woocommerce'
+import {
+  fetchCouponsFromSupabase, insertCouponToSupabase, deleteCouponFromSupabase,
+} from '@/lib/coupons'
 import { formatCurrency } from '@/data/mockData'
 
 const DISCOUNT_TYPES: { key: CouponDiscountType; label: string; hint: string }[] = [
@@ -40,16 +43,33 @@ export default function CouponsPage() {
   const [deleting, setDeleting] = useState(false)
 
   const loadCoupons = async () => {
-    if (!connection) {
-      setCoupons([])
-      return
-    }
     setFetching(true)
     try {
-      const data = await fetchCoupons(connection)
-      setCoupons(data)
+      if (connection) {
+        const wooData = await fetchCoupons(connection)
+        const supaData = await fetchCouponsFromSupabase()
+        const supaCodes = new Set(supaData.map((c) => c.code.toUpperCase()))
+        const missingFromSupa = wooData.filter((c) => !supaCodes.has(c.code.toUpperCase()))
+        for (const c of missingFromSupa) {
+          await insertCouponToSupabase({
+            code: c.code,
+            discountType: c.discountType,
+            amount: c.amount,
+            minimumSpend: c.minimumSpend,
+            usageLimit: c.usageLimit,
+            expiryDate: c.expiryDate,
+            freeShipping: c.freeShipping,
+          })
+        }
+        setCoupons(wooData)
+      } else {
+        const supaData = await fetchCouponsFromSupabase()
+        setCoupons(supaData)
+      }
     } catch (err) {
       pushToast('error', `Failed to load coupons: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      const supaData = await fetchCouponsFromSupabase()
+      setCoupons(supaData)
     } finally {
       setFetching(false)
     }
@@ -76,10 +96,13 @@ export default function CouponsPage() {
   }
 
   const handleDelete = async () => {
-    if (!deleteTarget || !connection) return
+    if (!deleteTarget) return
     setDeleting(true)
     try {
-      await deleteCoupon(connection, deleteTarget.id)
+      if (connection) {
+        await deleteCoupon(connection, deleteTarget.id)
+      }
+      await deleteCouponFromSupabase(deleteTarget.code)
       setCoupons((prev) => prev.filter((c) => c.id !== deleteTarget.id))
       pushToast('success', `Coupon "${deleteTarget.code}" deleted from your store.`)
       setDeleteTarget(null)
@@ -91,11 +114,29 @@ export default function CouponsPage() {
   }
 
   const handleCreate = async (input: CreateCouponInput) => {
-    if (!connection) return
     try {
-      const created = await createCoupon(connection, input)
-      setCoupons((prev) => [created, ...prev])
-      pushToast('success', `Coupon "${created.code}" created and synced to your store.`)
+      let created: Coupon
+      if (connection) {
+        created = await createCoupon(connection, input)
+      } else {
+        const supaCreated = await insertCouponToSupabase(input)
+        if (!supaCreated) throw new Error('Failed to create coupon in database.')
+        created = supaCreated
+      }
+      await insertCouponToSupabase({
+        code: created.code,
+        discountType: created.discountType,
+        amount: created.amount,
+        minimumSpend: created.minimumSpend,
+        usageLimit: created.usageLimit,
+        expiryDate: created.expiryDate,
+        freeShipping: created.freeShipping,
+      })
+      setCoupons((prev) => {
+        if (prev.some((c) => c.code.toUpperCase() === created.code.toUpperCase())) return prev
+        return [created, ...prev]
+      })
+      pushToast('success', `Coupon "${created.code}" created and synced.`)
       setCreateOpen(false)
     } catch (err) {
       pushToast('error', `Failed to create coupon: ${err instanceof Error ? err.message : 'Unknown error'}`)
