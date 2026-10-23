@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Loader as Loader2, Check, Package, Plus, Trash2, DollarSign, Boxes, Download, Layers, Image as ImageIcon2, CloudUpload as UploadCloud, Link as LinkIcon, CircleAlert as AlertCircle, RefreshCw } from 'lucide-react'
+import { X, Loader as Loader2, Check, Package, Plus, Trash2, DollarSign, Boxes, Download, Layers, Image as ImageIcon2, CloudUpload as UploadCloud, Link as LinkIcon, CircleAlert as AlertCircle, RefreshCw, GitBranch, Truck, Settings } from 'lucide-react'
 import { type Product, type ProductType, type TaxStatus, type Backorders, type DownloadableFile, type ProductAttribute, type ProductVariation } from '@/data/mockData'
 import { useWoo } from '@/auth/WooContext'
 import { fetchCategoriesFromCloud, type Category } from '@/lib/categories'
 
-type Tab = 'general' | 'inventory' | 'downloads' | 'attributes' | 'media'
+type Tab = 'general' | 'inventory' | 'shipping' | 'linked' | 'attributes' | 'variations' | 'advanced' | 'downloads' | 'media'
 
 type ProductFormData = {
   name: string
@@ -73,9 +73,13 @@ const EMPTY_FORM: ProductFormData = {
 const TABS: { key: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'general', label: 'General', icon: DollarSign },
   { key: 'inventory', label: 'Inventory', icon: Boxes },
-  { key: 'downloads', label: 'Downloads', icon: Download },
+  { key: 'shipping', label: 'Shipping', icon: Truck },
+  { key: 'linked', label: 'Linked', icon: LinkIcon },
   { key: 'attributes', label: 'Attributes', icon: Layers },
-  { key: 'media', label: 'Media & Categories', icon: ImageIcon2 },
+  { key: 'variations', label: 'Variations', icon: GitBranch },
+  { key: 'advanced', label: 'Advanced', icon: Settings },
+  { key: 'downloads', label: 'Downloads', icon: Download },
+  { key: 'media', label: 'Media', icon: ImageIcon2 },
 ]
 
 export default function AddProductModal({ open, mode, product, onClose, onSave }: AddProductModalProps) {
@@ -171,13 +175,18 @@ export default function AddProductModal({ open, mode, product, onClose, onSave }
     const next: Record<string, string> = {}
     if (!form.name.trim()) next.name = 'Enter a product title.'
     if (!form.sku.trim()) next.sku = 'Enter a SKU.'
-    const priceNum = Number(form.price)
-    if (!form.price.trim()) next.price = 'Enter a regular price.'
-    else if (isNaN(priceNum) || priceNum < 0) next.price = 'Enter a valid price.'
-    if (form.salePrice.trim()) {
-      const saleNum = Number(form.salePrice)
-      if (isNaN(saleNum) || saleNum < 0) next.salePrice = 'Enter a valid sale price.'
-      else if (priceNum > 0 && saleNum >= priceNum) next.salePrice = 'Sale price must be less than regular price.'
+    if (form.productType === 'simple') {
+      const priceNum = Number(form.price)
+      if (!form.price.trim()) next.price = 'Enter a regular price.'
+      else if (isNaN(priceNum) || priceNum < 0) next.price = 'Enter a valid price.'
+      if (form.salePrice.trim()) {
+        const saleNum = Number(form.salePrice)
+        if (isNaN(saleNum) || saleNum < 0) next.salePrice = 'Enter a valid sale price.'
+        else if (priceNum > 0 && saleNum >= priceNum) next.salePrice = 'Sale price must be less than regular price.'
+      }
+    }
+    if (form.productType === 'variable' && form.variations.length === 0) {
+      next.variations = 'Generate at least one variation before saving.'
     }
     if (form.manageStock) {
       const stockNum = Number(form.stock)
@@ -306,7 +315,19 @@ export default function AddProductModal({ open, mode, product, onClose, onSave }
   }
 
   // Show downloads tab only if downloadable
-  const visibleTabs = TABS.filter((t) => t.key !== 'downloads' || form.downloadable)
+  const visibleTabs = TABS.filter((t) => {
+    if (t.key === 'downloads') return form.downloadable
+    if (t.key === 'attributes') return form.productType === 'variable'
+    if (t.key === 'variations') return form.productType === 'variable'
+    return true
+  })
+
+  const handleProductTypeChange = (type: ProductType) => {
+    update('productType', type)
+    if (type !== 'variable' && (tab === 'attributes' || tab === 'variations')) {
+      setTab('general')
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50">
@@ -349,7 +370,7 @@ export default function AddProductModal({ open, mode, product, onClose, onSave }
               <select
                 id="p-type"
                 value={form.productType}
-                onChange={(e) => update('productType', e.target.value as ProductType)}
+                onChange={(e) => handleProductTypeChange(e.target.value as ProductType)}
                 className="input-field"
               >
                 <option value="simple">Simple product</option>
@@ -396,30 +417,39 @@ export default function AddProductModal({ open, mode, product, onClose, onSave }
           {/* Tab content */}
           {tab === 'general' && (
             <div className="space-y-4 animate-fade-in">
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Regular Price (₹)" htmlFor="p-price" error={errors.price}>
-                  <input
-                    id="p-price"
-                    type="number"
-                    min="0"
-                    value={form.price}
-                    onChange={(e) => update('price', e.target.value)}
-                    className="input-field"
-                    placeholder="2499"
-                  />
-                </Field>
-                <Field label="Sale Price (₹)" htmlFor="p-sale" error={errors.salePrice} hint="Optional">
-                  <input
-                    id="p-sale"
-                    type="number"
-                    min="0"
-                    value={form.salePrice}
-                    onChange={(e) => update('salePrice', e.target.value)}
-                    className="input-field"
-                    placeholder="1999"
-                  />
-                </Field>
-              </div>
+              {form.productType === 'variable' ? (
+                <div className="rounded-xl border border-brand/20 bg-brand-50/40 px-4 py-3">
+                  <p className="text-sm font-medium text-brand">Pricing is managed per variation</p>
+                  <p className="mt-0.5 text-xs text-brand/70">
+                    Go to the Variations tab to set the regular price, sale price, SKU, and stock for each individual variation.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Regular Price (₹)" htmlFor="p-price" error={errors.price}>
+                    <input
+                      id="p-price"
+                      type="number"
+                      min="0"
+                      value={form.price}
+                      onChange={(e) => update('price', e.target.value)}
+                      className="input-field"
+                      placeholder="2499"
+                    />
+                  </Field>
+                  <Field label="Sale Price (₹)" htmlFor="p-sale" error={errors.salePrice} hint="Optional">
+                    <input
+                      id="p-sale"
+                      type="number"
+                      min="0"
+                      value={form.salePrice}
+                      onChange={(e) => update('salePrice', e.target.value)}
+                      className="input-field"
+                      placeholder="1999"
+                    />
+                  </Field>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Sale Start Date" htmlFor="p-sale-start" hint="Optional">
                   <input
@@ -610,12 +640,10 @@ export default function AddProductModal({ open, mode, product, onClose, onSave }
             </div>
           )}
 
-          {tab === 'attributes' && (
+          {tab === 'attributes' && form.productType === 'variable' && (
             <div className="space-y-4 animate-fade-in">
               <p className="text-sm text-slate-500">
-                {form.productType === 'variable'
-                  ? 'Add attributes used for variations (e.g. Size: S, M, L). Enable "Used for variations" to generate variation combinations.'
-                  : 'Add custom attributes for this product (e.g. Brand, Material).'}
+                Add attributes used for variations (e.g. Size: S, M, L). Enable "Used for variations" to generate variation combinations.
               </p>
               <div className="space-y-3">
                 {form.attributes.map((attr, i) => (
@@ -639,15 +667,13 @@ export default function AddProductModal({ open, mode, product, onClose, onSave }
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
-                    <input
-                      value={attr.options.join(', ')}
-                      onChange={(e) => {
+                    <AttributeTagInput
+                      options={attr.options}
+                      onChange={(options) => {
                         const next = [...form.attributes]
-                        next[i] = { ...attr, options: e.target.value.split(',').map((o) => o.trim()).filter(Boolean) }
+                        next[i] = { ...attr, options }
                         update('attributes', next)
                       }}
-                      className="input-field text-sm"
-                      placeholder="Options (comma separated: S, M, L, XL)"
                     />
                     {form.productType === 'variable' && (
                       <label className="flex items-center gap-2 text-sm text-slate-600">
@@ -674,12 +700,17 @@ export default function AddProductModal({ open, mode, product, onClose, onSave }
               >
                 <Plus className="h-4 w-4" /> Add Attribute
               </button>
+            </div>
+          )}
 
-              {/* Generate Variations */}
-              {form.productType === 'variable' && form.attributes.some((a) => a.variation && a.options.length > 0) && (
-                <div className="space-y-3 animate-fade-in">
+          {tab === 'variations' && form.productType === 'variable' && (
+            <div className="space-y-4 animate-fade-in">
+              {form.attributes.some((a) => a.variation && a.options.length > 0) ? (
+                <>
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-slate-700">Variations</p>
+                    <p className="text-sm text-slate-500">
+                      Generate and manage individual variations. Each has its own SKU, price, and stock status.
+                    </p>
                     <button
                       type="button"
                       onClick={() => {
@@ -691,71 +722,161 @@ export default function AddProductModal({ open, mode, product, onClose, onSave }
                           sku: '',
                           price: form.price,
                           salePrice: form.salePrice.trim() ? form.salePrice : null,
+                          stockStatus: 'instock',
                           attributes: combo,
                         }))
                         update('variations', newVariations)
                       }}
-                      className="flex items-center gap-1.5 rounded-lg bg-[#9f0f0f] px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-[#880d0d]"
+                      className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[#9f0f0f] px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-[#880d0d]"
                     >
                       <Layers className="h-3.5 w-3.5" /> Generate Variations
                     </button>
                   </div>
-                  <div className="space-y-2">
-                    {form.variations.map((v, i) => (
-                      <div key={v.id} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-slate-500">
-                            {v.attributes.map((a) => `${a.name}: ${a.option}`).join(' · ')}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => update('variations', form.variations.filter((_, idx) => idx !== i))}
-                            className="rounded-lg p-1 text-slate-400 transition hover:bg-red-50 hover:text-red-500"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+
+                  {form.variations.length > 0 ? (
+                    <div className="space-y-2">
+                      {form.variations.map((v, i) => (
+                        <div key={v.id} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-slate-500">
+                              {v.attributes.map((a) => `${a.name}: ${a.option}`).join(' · ')}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => update('variations', form.variations.filter((_, idx) => idx !== i))}
+                              className="rounded-lg p-1 text-slate-400 transition hover:bg-red-50 hover:text-red-500"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                            <input
+                              value={v.sku}
+                              onChange={(e) => {
+                                const next = [...form.variations]
+                                next[i] = { ...v, sku: e.target.value }
+                                update('variations', next)
+                              }}
+                              className="input-field text-xs font-mono"
+                              placeholder="SKU"
+                            />
+                            <input
+                              value={v.price}
+                              onChange={(e) => {
+                                const next = [...form.variations]
+                                next[i] = { ...v, price: e.target.value }
+                                update('variations', next)
+                              }}
+                              type="number"
+                              min="0"
+                              className="input-field text-xs"
+                              placeholder="Regular ₹"
+                            />
+                            <input
+                              value={v.salePrice ?? ''}
+                              onChange={(e) => {
+                                const next = [...form.variations]
+                                next[i] = { ...v, salePrice: e.target.value || null }
+                                update('variations', next)
+                              }}
+                              type="number"
+                              min="0"
+                              className="input-field text-xs"
+                              placeholder="Sale ₹"
+                            />
+                            <select
+                              value={v.stockStatus ?? 'instock'}
+                              onChange={(e) => {
+                                const next = [...form.variations]
+                                next[i] = { ...v, stockStatus: e.target.value as 'instock' | 'outofstock' }
+                                update('variations', next)
+                              }}
+                              className="input-field text-xs"
+                            >
+                              <option value="instock">In stock</option>
+                              <option value="outofstock">Out of stock</option>
+                            </select>
+                          </div>
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <input
-                            value={v.sku}
-                            onChange={(e) => {
-                              const next = [...form.variations]
-                              next[i] = { ...v, sku: e.target.value }
-                              update('variations', next)
-                            }}
-                            className="input-field text-xs font-mono"
-                            placeholder="SKU"
-                          />
-                          <input
-                            value={v.price}
-                            onChange={(e) => {
-                              const next = [...form.variations]
-                              next[i] = { ...v, price: e.target.value }
-                              update('variations', next)
-                            }}
-                            type="number"
-                            min="0"
-                            className="input-field text-xs"
-                            placeholder="Price ₹"
-                          />
-                          <input
-                            value={v.salePrice ?? ''}
-                            onChange={(e) => {
-                              const next = [...form.variations]
-                              next[i] = { ...v, salePrice: e.target.value || null }
-                              update('variations', next)
-                            }}
-                            type="number"
-                            min="0"
-                            className="input-field text-xs"
-                            placeholder="Sale ₹"
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white py-10 text-center">
+                      <Layers className="h-8 w-8 text-slate-300" />
+                      <p className="mt-2 text-sm text-slate-400">No variations generated yet.</p>
+                      <p className="text-xs text-slate-400">Click "Generate Variations" to create all combinations from your attributes.</p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white py-10 text-center">
+                  <Layers className="h-8 w-8 text-slate-300" />
+                  <p className="mt-2 text-sm text-slate-400">No variation attributes found.</p>
+                  <p className="text-xs text-slate-400">Go to the Attributes tab, add an attribute, and enable "Used for variations".</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {tab === 'shipping' && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Weight (kg)" htmlFor="p-weight" hint="Optional">
+                  <input id="p-weight" type="number" min="0" step="0.01" className="input-field" placeholder="0.5" />
+                </Field>
+                <Field label="Dimensions (L×W×H cm)" htmlFor="p-dims" hint="Optional">
+                  <input id="p-dims" className="input-field" placeholder="10 × 10 × 5" />
+                </Field>
+              </div>
+              <Field label="Shipping Class" htmlFor="p-shipping-class">
+                <select id="p-shipping-class" className="input-field">
+                  <option value="">No shipping class</option>
+                  <option value="standard">Standard</option>
+                  <option value="express">Express</option>
+                  <option value="heavy">Heavy Items</option>
+                </select>
+              </Field>
+              <p className="text-xs text-slate-400">Shipping settings apply to physical products. Virtual products are not shipped.</p>
+            </div>
+          )}
+
+          {tab === 'linked' && (
+            <div className="space-y-4 animate-fade-in">
+              <Field label="Upsells" htmlFor="p-upsells" hint="Optional">
+                <input id="p-upsells" className="input-field" placeholder="Search for products to upsell…" />
+              </Field>
+              <Field label="Cross-sells" htmlFor="p-crosssells" hint="Optional">
+                <input id="p-crosssells" className="input-field" placeholder="Search for products to cross-sell…" />
+              </Field>
+              <Field label="Grouped Products" htmlFor="p-grouped" hint="Optional">
+                <input id="p-grouped" className="input-field" placeholder="Search for products to group…" />
+              </Field>
+              <p className="text-xs text-slate-400">Linked products help customers discover related items in your store.</p>
+            </div>
+          )}
+
+          {tab === 'advanced' && (
+            <div className="space-y-4 animate-fade-in">
+              <Field label="Menu Order" htmlFor="p-menu-order" hint="0 = default">
+                <input id="p-menu-order" type="number" min="0" className="input-field" placeholder="0" />
+              </Field>
+              <Field label="Purchase Note" htmlFor="p-purchase-note" hint="Optional">
+                <textarea id="p-purchase-note" rows={2} className="input-field resize-none" placeholder="Note shown to customer after purchase…" />
+              </Field>
+              <Field label="Reviews" htmlFor="p-reviews">
+                <select id="p-reviews" className="input-field">
+                  <option value="enabled">Enabled</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </Field>
+              <Field label="Visibility" htmlFor="p-visibility">
+                <select id="p-visibility" className="input-field">
+                  <option value="visible">Publicly visible</option>
+                  <option value="catalog">Catalog only</option>
+                  <option value="search">Search results only</option>
+                  <option value="hidden">Hidden</option>
+                </select>
+              </Field>
             </div>
           )}
 
@@ -929,6 +1050,13 @@ export default function AddProductModal({ open, mode, product, onClose, onSave }
             </div>
           )}
 
+          {errors.variations && (
+            <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 animate-fade-in">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{errors.variations}</span>
+            </div>
+          )}
+
           <button type="submit" disabled={saving} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#9f0f0f] px-5 py-3 text-sm font-semibold text-white shadow-md shadow-[#9f0f0f]/20 transition hover:bg-[#880d0d] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60">
             {saving ? (
               <><Loader2 className="h-4 w-4 animate-spin" /> {mode === 'edit' ? 'Updating…' : 'Publishing…'}</>
@@ -973,6 +1101,78 @@ function Field({ label, htmlFor, error, hint, children }: { label: string; htmlF
       </div>
       <div className="relative">{children}</div>
       {error && <p className="mt-1.5 text-sm text-red-600">{error}</p>}
+    </div>
+  )
+}
+
+function AttributeTagInput({ options, onChange }: { options: string[]; onChange: (options: string[]) => void }) {
+  const [inputValue, setInputValue] = useState('')
+
+  const addTag = (raw: string) => {
+    const tag = raw.trim()
+    if (tag && !options.includes(tag)) {
+      onChange([...options, tag])
+    }
+    setInputValue('')
+  }
+
+  const removeTag = (tag: string) => {
+    onChange(options.filter((o) => o !== tag))
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      if (inputValue.trim()) addTag(inputValue)
+    } else if (e.key === 'Backspace' && inputValue === '' && options.length > 0) {
+      removeTag(options[options.length - 1])
+    }
+  }
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value
+    if (val.includes(',')) {
+      const parts = val.split(',').map((p) => p.trim()).filter(Boolean)
+      const newTags = parts.filter((p) => !options.includes(p))
+      if (newTags.length > 0) {
+        onChange([...options, ...newTags])
+      }
+      setInputValue('')
+    } else {
+      setInputValue(val)
+    }
+  }
+
+  const handleBlur = () => {
+    if (inputValue.trim()) addTag(inputValue)
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2 py-2 min-h-[42px] focus-within:border-[#9f0f0f]/40 focus-within:ring-2 focus-within:ring-[#9f0f0f]/10">
+      {options.map((opt) => (
+        <span
+          key={opt}
+          className="inline-flex items-center gap-1 rounded-lg bg-[#9f0f0f]/10 px-2 py-1 text-xs font-medium text-[#9f0f0f] animate-fade-in"
+        >
+          {opt}
+          <button
+            type="button"
+            onClick={() => removeTag(opt)}
+            className="rounded p-0.5 transition hover:bg-[#9f0f0f]/20"
+            aria-label={`Remove ${opt}`}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </span>
+      ))}
+      <input
+        value={inputValue}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        onBlur={handleBlur}
+        className="flex-1 min-w-[120px] border-0 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+        placeholder={options.length === 0 ? 'Type a value and press Enter (or comma)' : 'Add another…'}
+      />
     </div>
   )
 }

@@ -88,6 +88,7 @@ async function fetchCouponByCode(code: string): Promise<Coupon | null> {
 
 type CartLine = {
   productId: string
+  variationId: string | null
   name: string
   price: number
   quantity: number
@@ -284,21 +285,21 @@ export default function PosPage() {
       if (existing) {
         return prev.map((l) => (l.productId === product.id ? { ...l, quantity: l.quantity + 1 } : l))
       }
-      return [...prev, { productId: product.id, name: product.name, price: product.salePrice ?? product.price, quantity: 1 }]
+      return [...prev, { productId: product.id, variationId: null, name: product.name, price: product.salePrice ?? product.price, quantity: 1 }]
     })
   }
 
   const addVariationToCart = (variation: ProductVariation, price: number, name: string) => {
     if (!variationProduct) return
-    const cartId = `${variationProduct.id}-${variation.id}`
+    const cartKey = `${variationProduct.id}-${variation.id}`
     setFlashId(variationProduct.id)
     window.setTimeout(() => setFlashId((cur) => (cur === variationProduct.id ? null : cur)), 400)
     setCart((prev) => {
-      const existing = prev.find((l) => l.productId === cartId)
+      const existing = prev.find((l) => l.productId === cartKey)
       if (existing) {
-        return prev.map((l) => (l.productId === cartId ? { ...l, quantity: l.quantity + 1 } : l))
+        return prev.map((l) => (l.productId === cartKey ? { ...l, quantity: l.quantity + 1 } : l))
       }
-      return [...prev, { productId: cartId, name, price, quantity: 1 }]
+      return [...prev, { productId: cartKey, variationId: variation.id, name, price, quantity: 1 }]
     })
     setVariationProduct(null)
   }

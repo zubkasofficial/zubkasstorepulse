@@ -19,7 +19,7 @@ export type ProductRow = {
   images: ProductImage[] | string | null
   description: string | null
   attributes: Array<{ id: number; name: string; position: number; visible: boolean; variation: boolean; options: string[] }> | null
-  variations: Array<{ id: string; sku: string; price: string; salePrice: string | null; attributes: Array<{ name: string; option: string }> }> | null
+  variations: Array<{ id: string; sku: string; price: string; salePrice: string | null; stockStatus: 'instock' | 'outofstock'; attributes: Array<{ name: string; option: string }> }> | null
   created_at: string
   updated_at: string
 }
@@ -103,7 +103,16 @@ function mapProductRow(r: ProductRow): Product {
     downloadLimit: 0,
     downloadExpiry: 0,
     attributes: Array.isArray(r.attributes) ? r.attributes : [],
-    variations: Array.isArray(r.variations) ? r.variations : [],
+    variations: Array.isArray(r.variations)
+      ? r.variations.map((v) => ({
+          id: v.id,
+          sku: v.sku,
+          price: v.price,
+          salePrice: v.salePrice,
+          stockStatus: (v.stockStatus === 'instock' || v.stockStatus === 'outofstock') ? v.stockStatus : 'instock' as const,
+          attributes: v.attributes,
+        }))
+      : [],
     tags: [],
   }
 }
@@ -161,7 +170,7 @@ export type StandaloneProductInput = {
   imageUrl: string
   description: string
   attributes?: Array<{ id: number; name: string; position: number; visible: boolean; variation: boolean; options: string[] }>
-  variations?: Array<{ id: string; sku: string; price: string; salePrice: string | null; attributes: Array<{ name: string; option: string }> }>
+  variations?: Array<{ id: string; sku: string; price: string; salePrice: string | null; stockStatus: 'instock' | 'outofstock'; attributes: Array<{ name: string; option: string }> }>
   type?: 'simple' | 'variable'
 }
 
@@ -241,7 +250,7 @@ export async function updateStandaloneProductStock(id: string, newStock: number)
 /* ---------------- POS sales (checkout) ---------------- */
 
 export type StandaloneCheckoutInput = {
-  lines: Array<{ productId: string; name: string; price: number; quantity: number }>
+  lines: Array<{ productId: string; variationId: string | null; name: string; price: number; quantity: number }>
   customerName: string
   customerPhone: string
   subtotal: number
@@ -287,9 +296,13 @@ export async function createStandaloneSale(input: StandaloneCheckoutInput): Prom
   if (saleErr || !saleData) throw new Error(saleErr?.message ?? 'Failed to record sale.')
 
   const sale = saleData as PosSaleRow
+
+  // Variation cart lines use a composite key "parentId-variationId" for dedup.
+  // Extract the real product UUID for the database; set product_id to null for variation lines
+  // since pos_sale_items.product_id is a UUID FK to products, and variation IDs aren't product rows.
   const itemRows = input.lines.map((l) => ({
     sale_id: sale.id,
-    product_id: l.productId,
+    product_id: l.variationId ? null : l.productId,
     product_name: l.name,
     quantity: l.quantity,
     unit_price: l.price,
@@ -299,8 +312,9 @@ export async function createStandaloneSale(input: StandaloneCheckoutInput): Prom
     if (itemsErr) throw new Error(itemsErr.message)
   }
 
-  // Deduct stock for each line
+  // Deduct stock for each line (skip variation lines — stock is tracked per variation, not product row)
   for (const l of input.lines) {
+    if (l.variationId) continue
     try {
       // Read current stock then update — single-tenant, low concurrency is acceptable here.
       const { data: prod } = await sb.from('products').select('stock_quantity').eq('id', l.productId).maybeSingle()

@@ -52,6 +52,10 @@ export default function VariationPickerModal({ product, onClose, onSelect }: Var
     return sale ?? price
   }, [matchedVariation, product])
 
+  const matchedOutOfStock = useMemo(() => {
+    return !!matchedVariation && matchedVariation.stockStatus === 'outofstock'
+  }, [matchedVariation])
+
   const variationLabel = useMemo(() => {
     const parts = variationAttrs.map((a) => selectedOptions[a.name]).filter(Boolean)
     return parts.length > 0 ? parts.join(' / ') : ''
@@ -125,17 +129,28 @@ export default function VariationPickerModal({ product, onClose, onSelect }: Var
                   {formatCurrency(variationPrice)}
                 </p>
               </div>
-              {matchedVariation.sku && (
-                <div className="text-right">
-                  <p className="text-xs text-slate-400">SKU</p>
-                  <p className="text-sm font-medium text-slate-600">{matchedVariation.sku}</p>
-                </div>
-              )}
+              <div className="text-right">
+                {matchedVariation.sku && (
+                  <>
+                    <p className="text-xs text-slate-400">SKU</p>
+                    <p className="text-sm font-medium text-slate-600">{matchedVariation.sku}</p>
+                  </>
+                )}
+                <p className={`mt-1 text-xs font-semibold ${matchedOutOfStock ? 'text-red-600' : 'text-green-600'}`}>
+                  {matchedOutOfStock ? 'Out of stock' : 'In stock'}
+                </p>
+              </div>
             </div>
           </div>
         )}
 
-        {!matchedVariation && variationAttrs.length > 0 && (
+        {matchedOutOfStock && (
+          <p className="mt-4 text-center text-sm text-red-600">
+            This variation is out of stock and cannot be added to the cart.
+          </p>
+        )}
+
+        {!matchedVariation && variationAttrs.length > 0 && !matchedOutOfStock && (
           <p className="mt-4 text-center text-sm text-amber-600">
             No matching variation for the selected options.
           </p>
@@ -150,7 +165,7 @@ export default function VariationPickerModal({ product, onClose, onSelect }: Var
           </button>
           <button
             onClick={handleConfirm}
-            disabled={!matchedVariation}
+            disabled={!matchedVariation || matchedOutOfStock}
             className="flex-1 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Add to Cart

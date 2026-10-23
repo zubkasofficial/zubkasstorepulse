@@ -49,6 +49,17 @@ export type WooOrder = {
   }>
 }
 
+export type WooVariation = {
+  id: number
+  sku: string
+  regular_price: string
+  sale_price: string
+  stock_status: string
+  manage_stock: boolean
+  stock_quantity: number | null
+  attributes: Array<{ id: number; name: string; option: string }>
+}
+
 export type WooProduct = {
   id: number
   name: string
@@ -383,7 +394,7 @@ function mapOrder(o: WooOrder): Order {
   }
 }
 
-function mapProduct(p: WooProduct): Product {
+function mapProduct(p: WooProduct, variations: ProductVariation[] = []): Product {
   const category = p.categories?.[0]?.name ?? 'Uncategorized'
   const price = Number(p.regular_price || p.price) || 0
   const sale = p.sale_price ? Number(p.sale_price) : null
@@ -423,8 +434,19 @@ function mapProduct(p: WooProduct): Product {
       variation: a.variation,
       options: a.options,
     })),
-    variations: [],
+    variations,
     tags: (p.tags ?? []).map((t) => t.name),
+  }
+}
+
+function mapVariation(v: WooVariation): ProductVariation {
+  return {
+    id: String(v.id),
+    sku: v.sku || '',
+    price: v.regular_price || '0',
+    salePrice: v.sale_price ? v.sale_price : null,
+    stockStatus: v.stock_status === 'outofstock' ? 'outofstock' : 'instock',
+    attributes: (v.attributes ?? []).map((a) => ({ name: a.name, option: a.option })),
   }
 }
 
@@ -454,7 +476,21 @@ export async function fetchOrders(conn: WooConnection, perPage = 50): Promise<Or
 
 export async function fetchProducts(conn: WooConnection, perPage = 50): Promise<Product[]> {
   const data = await wooFetch<WooProduct[]>(conn, `products?per_page=${perPage}&status=publish`)
-  return data.map(mapProduct)
+  const products = data.map((p) => mapProduct(p))
+  const variableProducts = products.filter((p) => p.type === 'variable')
+  if (variableProducts.length > 0) {
+    await Promise.all(
+      variableProducts.map(async (p) => {
+        try {
+          const vData = await wooFetch<WooVariation[]>(conn, `products/${p.id}/variations?per_page=100`)
+          p.variations = vData.map(mapVariation)
+        } catch {
+          // variations fetch failed — leave empty
+        }
+      }),
+    )
+  }
+  return products
 }
 
 export async function fetchCustomers(conn: WooConnection, perPage = 50): Promise<Customer[]> {
@@ -635,6 +671,7 @@ export type CreateProductInput = {
 
 export type PosCartLine = {
   productId: string
+  variationId: string | null
   name: string
   price: number
   quantity: number
@@ -698,10 +735,18 @@ export async function createPosOrder(conn: WooConnection, input: CreatePosOrderI
       postcode: '',
       country: 'IN',
     },
-    line_items: input.lines.map((l) => ({
-      product_id: Number(l.productId),
-      quantity: Number(l.quantity),
-    })),
+    line_items: input.lines.map((l) => {
+      const item: Record<string, unknown> = {
+        quantity: Number(l.quantity),
+      }
+      if (l.variationId) {
+        item.product_id = Number(l.productId.includes('-') ? l.productId.split('-')[0] : l.productId)
+        item.variation_id = Number(l.variationId)
+      } else {
+        item.product_id = Number(l.productId)
+      }
+      return item
+    }),
   }
 
   const feeLines: Array<{ name: string; total: string; total_tax: string }> = []
@@ -900,6 +945,8 @@ export async function createProduct(conn: WooConnection, input: CreateProductInp
           sku: v.sku,
           regular_price: v.price,
           attributes: v.attributes,
+          stock_status: v.stockStatus ?? 'instock',
+          manage_stock: false,
         }
         if (v.salePrice) {
           vBody.sale_price = v.salePrice
@@ -913,6 +960,7 @@ export async function createProduct(conn: WooConnection, input: CreateProductInp
           sku: v.sku,
           price: v.price,
           salePrice: v.salePrice,
+          stockStatus: v.stockStatus ?? 'instock',
           attributes: v.attributes,
         })
       } catch {
