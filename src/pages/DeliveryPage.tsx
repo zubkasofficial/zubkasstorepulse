@@ -13,9 +13,10 @@ import {
 import { formatCurrency, type Order } from '@/data/mockData'
 import { resolveCustomerName } from '@/lib/customerName'
 import type { Customer } from '@/data/mockData'
+import { updateStandaloneOrderStatus, upsertDelivery } from '@/lib/standaloneDb'
 
 export default function DeliveryPage() {
-  const { orders, customers, loading, connection, refresh, updateOrder, pushToast } = useWoo()
+  const { orders, customers, loading, connection, refresh, updateOrder, pushToast, isStandalone } = useWoo()
   const [staffId, setStaffId] = useState('all')
   const [completeTarget, setCompleteTarget] = useState<Order | null>(null)
   const [signature, setSignature] = useState('')
@@ -71,9 +72,41 @@ export default function DeliveryPage() {
     }
     setProcessing(true)
     updateOrder(completeTarget.id, { status: 'Completed' })
-    if (connection) {
+    const orderNumber = completeTarget.id.replace(/^#/, '')
+    const nowIso = new Date().toISOString()
+    if (isStandalone) {
+      try {
+        await updateStandaloneOrderStatus(completeTarget.id, 'Completed')
+        await upsertDelivery({
+          orderNumber,
+          courier: '',
+          awb: '',
+          trackingUrl: '',
+          estimatedDelivery: '',
+          shippedAt: nowIso,
+          deliveryStatus: 'delivered',
+          signature,
+          completedAt: nowIso,
+        })
+        pushToast('success', `Order ${completeTarget.id} marked as delivered.`)
+      } catch (err) {
+        pushToast('error', `Marked locally, but cloud sync failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      }
+      refresh()
+    } else if (connection) {
       try {
         await completeOrderDelivery(connection, completeTarget.id, signature)
+        await upsertDelivery({
+          orderNumber,
+          courier: '',
+          awb: '',
+          trackingUrl: '',
+          estimatedDelivery: '',
+          shippedAt: nowIso,
+          deliveryStatus: 'delivered',
+          signature,
+          completedAt: nowIso,
+        })
         pushToast('success', `Order ${completeTarget.id} marked as delivered and synced to WooCommerce.`)
         refresh()
       } catch (err) {

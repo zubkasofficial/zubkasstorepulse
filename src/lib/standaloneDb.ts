@@ -359,3 +359,99 @@ export async function fetchStandaloneOrders(limit = 100): Promise<Order[]> {
 
   return saleRows.map((s) => mapSaleToOrder(s, itemsBySale.get(s.id) ?? []))
 }
+
+/* ---------------- order status updates ---------------- */
+
+export async function updateStandaloneOrderStatus(orderId: string, status: OrderStatus): Promise<void> {
+  const sb = getSupabase()
+  if (!sb) return
+  const orderNumber = orderId.replace(/^#/, '')
+  const { error } = await sb
+    .from('pos_sales')
+    .update({ status })
+    .eq('order_number', orderNumber)
+  if (error) throw new Error(error.message)
+}
+
+/* ---------------- deliveries sync ---------------- */
+
+export type DeliveryRecord = {
+  orderNumber: string
+  courier: string
+  awb: string
+  trackingUrl: string
+  estimatedDelivery: string
+  shippedAt: string
+  deliveryStatus?: string
+  staffId?: string | null
+  staffName?: string | null
+  signature?: string | null
+  completedAt?: string | null
+}
+
+async function resolveOrderId(orderNumber: string): Promise<string | null> {
+  const sb = getSupabase()
+  if (!sb) return null
+  const { data } = await sb
+    .from('pos_sales')
+    .select('id')
+    .eq('order_number', orderNumber)
+    .maybeSingle()
+  if (data) return (data as { id: string }).id
+  const { data: orderData } = await sb
+    .from('orders')
+    .select('id')
+    .eq('order_number', orderNumber)
+    .maybeSingle()
+  return orderData ? (orderData as { id: string }).id : null
+}
+
+export async function upsertDelivery(record: DeliveryRecord): Promise<void> {
+  const sb = getSupabase()
+  if (!sb) return
+  const orderId = await resolveOrderId(record.orderNumber)
+  const row = {
+    order_id: orderId,
+    order_number: record.orderNumber,
+    courier: record.courier,
+    awb: record.awb,
+    tracking_url: record.trackingUrl || null,
+    estimated_delivery: record.estimatedDelivery || null,
+    shipped_at: record.shippedAt,
+    delivery_status: record.deliveryStatus ?? 'shipped',
+    staff_id: record.staffId ?? null,
+    staff_name: record.staffName ?? null,
+    signature: record.signature ?? null,
+    completed_at: record.completedAt ?? null,
+    updated_at: new Date().toISOString(),
+  }
+  const { error } = await sb
+    .from('deliveries')
+    .upsert(row, { onConflict: 'order_number' })
+  if (error) throw new Error(error.message)
+}
+
+export async function fetchDeliveryByOrderNumber(orderNumber: string): Promise<DeliveryRecord | null> {
+  const sb = getSupabase()
+  if (!sb) return null
+  const { data, error } = await sb
+    .from('deliveries')
+    .select('*')
+    .eq('order_number', orderNumber)
+    .maybeSingle()
+  if (error || !data) return null
+  const r = data as Record<string, string | null>
+  return {
+    orderNumber: r.order_number as string,
+    courier: r.courier as string,
+    awb: r.awb as string,
+    trackingUrl: r.tracking_url ?? '',
+    estimatedDelivery: r.estimated_delivery ?? '',
+    shippedAt: r.shipped_at as string,
+    deliveryStatus: r.delivery_status as string,
+    staffId: r.staff_id,
+    staffName: r.staff_name,
+    signature: r.signature,
+    completedAt: r.completed_at,
+  }
+}

@@ -537,6 +537,7 @@ export default function ProductsPage() {
         open={modalOpen}
         mode={editTarget ? 'edit' : 'create'}
         product={editTarget}
+        appMode={appMode as 'standalone' | 'woo'}
         onClose={() => { setModalOpen(false); setEditTarget(null) }}
         onSave={handleSave}
       />

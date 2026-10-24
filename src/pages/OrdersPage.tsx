@@ -13,12 +13,18 @@ import { type DeliveryStaff } from '@/lib/deliveryStaff'
 import { formatCurrency, type Order, type OrderStatus } from '@/data/mockData'
 import { resolveCustomerName } from '@/lib/customerName'
 import { getSupabase } from '@/lib/supabase'
+import { updateStandaloneOrderStatus, upsertDelivery } from '@/lib/standaloneDb'
+
+function extractOrderNumber(orderId: string): string | null {
+  const match = orderId.match(/(\d+)/)
+  return match ? match[1] : null
+}
 
 const STATUS_FILTERS: ('All' | OrderStatus)[] = ['All', 'Processing', 'Completed', 'On Hold', 'Cancelled', 'Refunded', 'Shipped', 'Out for Delivery']
 const BULK_STATUSES: OrderStatus[] = ['Processing', 'Completed', 'On Hold', 'Cancelled', 'Refunded', 'Shipped', 'Out for Delivery']
 
 export default function OrdersPage() {
-  const { orders, loading, isLive, refresh, updateOrder, pushToast, connection, customers } = useWoo()
+  const { orders, loading, isLive, refresh, updateOrder, pushToast, connection, customers, isStandalone } = useWoo()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<'All' | OrderStatus>('All')
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -62,7 +68,19 @@ export default function OrdersPage() {
     if (activeOrder?.id === id) {
       setActiveOrder((prev) => (prev ? { ...prev, status } : prev))
     }
-    if (connection) {
+    if (isStandalone) {
+      try {
+        await updateStandaloneOrderStatus(id, status)
+        pushToast('success', `Order ${id} updated to ${status}.`)
+      } catch (err) {
+        pushToast('error', `Failed to update order: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      }
+    } else if (connection) {
+      const numericId = extractOrderNumber(id)
+      if (!numericId) {
+        pushToast('error', `Cannot sync order ${id}: invalid order ID format.`)
+        return
+      }
       try {
         await apiUpdateOrderStatus(connection, id, status)
         pushToast('success', `Order ${id} updated to ${status}.`)
@@ -78,13 +96,44 @@ export default function OrdersPage() {
     if (activeOrder?.id === id) {
       setActiveOrder((prev) => (prev ? { ...prev, status: 'Shipped' } : prev))
     }
-    if (connection) {
+    const orderNumber = id.replace(/^#/, '')
+    if (isStandalone) {
+      try {
+        await updateStandaloneOrderStatus(id, 'Shipped')
+        await upsertDelivery({
+          orderNumber,
+          courier: info.courier,
+          awb: info.awb,
+          trackingUrl: info.trackingUrl,
+          estimatedDelivery: info.estimatedDelivery,
+          shippedAt: info.shippedAt,
+          deliveryStatus: 'shipped',
+        })
+        pushToast('success', `Order ${id} marked as shipped via ${info.courier}.`)
+      } catch (err) {
+        pushToast('error', `Order shipped locally, but cloud sync failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      }
+    } else if (connection) {
+      const numericId = extractOrderNumber(id)
+      if (!numericId) {
+        pushToast('error', `Cannot sync order ${id}: invalid order ID format.`)
+        return
+      }
       try {
         await apiUpdateOrderShipping(connection, id, {
           courier: info.courier,
           awb: info.awb,
           trackingUrl: info.trackingUrl,
           estimatedDelivery: info.estimatedDelivery,
+        })
+        await upsertDelivery({
+          orderNumber,
+          courier: info.courier,
+          awb: info.awb,
+          trackingUrl: info.trackingUrl,
+          estimatedDelivery: info.estimatedDelivery,
+          shippedAt: info.shippedAt,
+          deliveryStatus: 'shipped',
         })
         pushToast('success', `Order ${id} marked as shipped via ${info.courier}.`)
       } catch (err) {
@@ -100,13 +149,48 @@ export default function OrdersPage() {
     if (activeOrder?.id === id) {
       setActiveOrder((prev) => (prev ? { ...prev, status: 'Out for Delivery' } : prev))
     }
-    if (connection) {
+    const orderNumber = id.replace(/^#/, '')
+    if (isStandalone) {
+      try {
+        await updateStandaloneOrderStatus(id, 'Out for Delivery')
+        await upsertDelivery({
+          orderNumber,
+          courier: '',
+          awb: '',
+          trackingUrl: '',
+          estimatedDelivery: '',
+          shippedAt: new Date().toISOString(),
+          deliveryStatus: 'out_for_delivery',
+          staffId: staff.id,
+          staffName: staff.name,
+        })
+      } catch {
+        // status persisted in local state already
+      }
+      pushToast('success', `Staff Assigned Successfully — ${staff.name} assigned to order ${id}.`)
+    } else if (connection) {
+      const numericId = extractOrderNumber(id)
+      if (!numericId) {
+        pushToast('error', `Cannot sync order ${id}: invalid order ID format.`)
+        return
+      }
       try {
         await assignOrderDelivery(connection, id, {
           staffId: staff.id,
           staffName: staff.name,
           staffPhone: staff.phone,
           vehicle: staff.vehicle,
+        })
+        await upsertDelivery({
+          orderNumber,
+          courier: '',
+          awb: '',
+          trackingUrl: '',
+          estimatedDelivery: '',
+          shippedAt: new Date().toISOString(),
+          deliveryStatus: 'out_for_delivery',
+          staffId: staff.id,
+          staffName: staff.name,
         })
         pushToast('success', `Staff Assigned Successfully — ${staff.name} assigned to order ${id}.`)
       } catch (err) {
@@ -138,7 +222,7 @@ export default function OrdersPage() {
     }
   }
 
-  const handleBulkStatus = (status: OrderStatus) => {
+  const handleBulkStatus = async (status: OrderStatus) => {
     for (const id of selected) {
       updateOrder(id, { status })
     }
@@ -146,7 +230,25 @@ export default function OrdersPage() {
       setActiveOrder((prev) => (prev ? { ...prev, status } : prev))
     }
     setBulkMenuOpen(false)
-    pushToast('success', `${selected.size} order(s) updated to ${status}.`)
+    if (isStandalone) {
+      let ok = 0
+      let failed = 0
+      for (const id of selected) {
+        try {
+          await updateStandaloneOrderStatus(id, status)
+          ok++
+        } catch {
+          failed++
+        }
+      }
+      if (failed === 0) {
+        pushToast('success', `${ok} order(s) updated to ${status}.`)
+      } else {
+        pushToast('error', `${ok} updated, ${failed} failed.`)
+      }
+    } else {
+      pushToast('success', `${selected.size} order(s) updated to ${status}.`)
+    }
   }
 
   const handleBulkExport = () => {

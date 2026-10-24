@@ -38,6 +38,7 @@ type AddProductModalProps = {
   open: boolean
   mode: 'create' | 'edit'
   product?: Product | null
+  appMode: 'standalone' | 'woo'
   onClose: () => void
   onSave: (product: Omit<Product, 'id' | 'unitsSold'>, id?: string) => void
 }
@@ -82,7 +83,8 @@ const TABS: { key: Tab; label: string; icon: React.ComponentType<{ className?: s
   { key: 'media', label: 'Media', icon: ImageIcon2 },
 ]
 
-export default function AddProductModal({ open, mode, product, onClose, onSave }: AddProductModalProps) {
+export default function AddProductModal({ open, mode, product, appMode, onClose, onSave }: AddProductModalProps) {
+  const isWoo = appMode === 'woo'
   const { pushToast } = useWoo()
   const [form, setForm] = useState<ProductFormData>(EMPTY_FORM)
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -319,6 +321,8 @@ export default function AddProductModal({ open, mode, product, onClose, onSave }
     if (t.key === 'downloads') return form.downloadable
     if (t.key === 'attributes') return form.productType === 'variable'
     if (t.key === 'variations') return form.productType === 'variable'
+    if (t.key === 'linked') return isWoo
+    if (t.key === 'advanced') return isWoo
     return true
   })
 
@@ -377,24 +381,28 @@ export default function AddProductModal({ open, mode, product, onClose, onSave }
                 <option value="variable">Variable product</option>
               </select>
             </Field>
-            <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <input
-                type="checkbox"
-                checked={form.virtual}
-                onChange={(e) => update('virtual', e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-[#9f0f0f] focus:ring-[#9f0f0f]/20"
-              />
-              <span className="text-sm font-medium text-slate-700">Virtual</span>
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <input
-                type="checkbox"
-                checked={form.downloadable}
-                onChange={(e) => update('downloadable', e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-[#9f0f0f] focus:ring-[#9f0f0f]/20"
-              />
-              <span className="text-sm font-medium text-slate-700">Downloadable</span>
-            </label>
+            {isWoo && (
+              <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={form.virtual}
+                  onChange={(e) => update('virtual', e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-[#9f0f0f] focus:ring-[#9f0f0f]/20"
+                />
+                <span className="text-sm font-medium text-slate-700">Virtual</span>
+              </label>
+            )}
+            {isWoo && (
+              <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={form.downloadable}
+                  onChange={(e) => update('downloadable', e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-[#9f0f0f] focus:ring-[#9f0f0f]/20"
+                />
+                <span className="text-sm font-medium text-slate-700">Downloadable</span>
+              </label>
+            )}
           </div>
 
           {/* Tabs */}
