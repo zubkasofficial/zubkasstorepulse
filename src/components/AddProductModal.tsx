@@ -6,6 +6,11 @@ import { fetchCategories, type Category } from '@/lib/categories'
 
 type Tab = 'general' | 'inventory' | 'shipping' | 'linked' | 'attributes' | 'variations' | 'advanced' | 'downloads' | 'media'
 
+type GalleryImage = {
+  id: string
+  src: string
+}
+
 type ProductFormData = {
   name: string
   sku: string
@@ -32,6 +37,7 @@ type ProductFormData = {
   attributes: ProductAttribute[]
   variations: ProductVariation[]
   imageUrl: string
+  galleryImages: string[]
   tags: string
   description: string
   fullDescription: string
@@ -83,6 +89,7 @@ const EMPTY_FORM: ProductFormData = {
   attributes: [],
   variations: [],
   imageUrl: '',
+  galleryImages: [],
   tags: '',
   description: '',
   fullDescription: '',
@@ -128,6 +135,13 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
   const [showUrlInput, setShowUrlInput] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Gallery state
+  const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([])
+  const [galleryUploading, setGalleryUploading] = useState(false)
+  const [galleryError, setGalleryError] = useState('')
+  const [showGalleryUrlInput, setShowGalleryUrlInput] = useState(false)
+  const [galleryUrlInput, setGalleryUrlInput] = useState('')
+  const galleryFileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!open) return
@@ -170,6 +184,7 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
         attributes: product.attributes,
         variations: product.variations,
         imageUrl: product.imageUrl,
+        galleryImages: product.galleryImages,
         tags: product.tags.join(', '),
         description: product.description,
         fullDescription: product.fullDescription,
@@ -186,6 +201,7 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
         posAvailable: product.posAvailable,
       })
       setImagePreview(product.imageUrl)
+      setGalleryImages((product.galleryImages ?? []).map((src, i) => ({ id: `gal-${i}-${Date.now()}`, src })))
     } else {
       setForm(EMPTY_FORM)
       setImagePreview('')
@@ -196,6 +212,11 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
     setShowUrlInput(false)
     setUploading(false)
     setIsDragging(false)
+    setGalleryImages([])
+    setGalleryUploading(false)
+    setGalleryError('')
+    setShowGalleryUrlInput(false)
+    setGalleryUrlInput('')
   }, [open, mode, product, appMode, connection])
 
   useEffect(() => {
@@ -221,7 +242,6 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
   const validate = () => {
     const next: Record<string, string> = {}
     if (!form.name.trim()) next.name = 'Enter a product title.'
-    if (!form.sku.trim()) next.sku = 'Enter a SKU.'
     if (form.productType === 'simple') {
       const priceNum = Number(form.price)
       if (!form.price.trim()) next.price = 'Enter a regular price.'
@@ -285,6 +305,7 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
           tags: form.tags.split(',').map((t) => t.trim()).filter(Boolean),
           image: '📦',
           imageUrl: form.imageUrl.trim(),
+          galleryImages: galleryImages.map((g) => g.src).filter((s) => s.trim() !== ''),
           description: form.description.trim(),
           fullDescription: form.fullDescription.trim(),
           weight: form.weight.trim(),
@@ -316,6 +337,10 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
     setUploadError('')
     setShowUrlInput(false)
     setUploading(false)
+    setGalleryImages([])
+    setGalleryError('')
+    setShowGalleryUrlInput(false)
+    setGalleryUrlInput('')
     onClose()
   }
 
@@ -373,6 +398,59 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
     update('imageUrl', '')
     setUploadError('')
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // ---- Gallery image handlers ----
+  const handleGalleryFileSelect = (file: File) => {
+    if (galleryUploading) return
+    const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp']
+    if (!validTypes.includes(file.type)) {
+      setGalleryError('Please select a PNG, JPG, or WEBP image.')
+      pushToast('error', 'Invalid file type. Use PNG, JPG, or WEBP.')
+      return
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setGalleryError('Image must be under 8 MB.')
+      pushToast('error', 'Image too large. Maximum 8 MB.')
+      return
+    }
+    setGalleryError('')
+    setGalleryUploading(true)
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result as string
+      setGalleryImages((prev) => [...prev, { id: `gal-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, src: dataUrl }])
+      setGalleryUploading(false)
+      pushToast('success', 'Gallery image added.')
+    }
+    reader.onerror = () => {
+      setGalleryUploading(false)
+      setGalleryError('Failed to read the image file.')
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleAddGalleryUrl = () => {
+    const url = galleryUrlInput.trim()
+    if (!url) return
+    if (!/^https?:\/\//i.test(url) && !url.startsWith('data:')) {
+      setGalleryError('Enter a valid image URL (https://...) or data URL.')
+      return
+    }
+    setGalleryError('')
+    setGalleryImages((prev) => [...prev, { id: `gal-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, src: url }])
+    setGalleryUrlInput('')
+    pushToast('success', 'Gallery image added.')
+  }
+
+  const handleRemoveGalleryImage = (id: string) => {
+    setGalleryImages((prev) => prev.filter((g) => g.id !== id))
+  }
+
+  const handleGalleryDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const file = e.dataTransfer.files?.[0]
+    if (file) handleGalleryFileSelect(file)
   }
 
   // Show downloads tab only if downloadable
@@ -1061,109 +1139,160 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
           )}
 
           {tab === 'media' && (
-            <div className="space-y-4 animate-fade-in">
-              {/* Image upload / preview */}
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Featured Image</label>
+            <div className="grid grid-cols-1 gap-5 animate-fade-in lg:grid-cols-[1fr_320px]">
+              {/* Main column: description */}
+              <div className="space-y-4">
+                <Field label="Short Description" htmlFor="p-desc">
+                  <textarea
+                    id="p-desc"
+                    value={form.description}
+                    onChange={(e) => update('description', e.target.value)}
+                    rows={3}
+                    className="input-field resize-none"
+                    placeholder="Brief description shown on product listing…"
+                  />
+                </Field>
+                <Field label="Full Description" htmlFor="p-full-desc">
+                  <textarea
+                    id="p-full-desc"
+                    value={form.fullDescription}
+                    onChange={(e) => update('fullDescription', e.target.value)}
+                    rows={6}
+                    className="input-field resize-none"
+                    placeholder="Full product description shown on the product page…"
+                  />
+                </Field>
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Category" htmlFor="p-category" hint={isWoo ? 'WooCommerce store' : 'Local catalog'}>
+                    <select
+                      id="p-category"
+                      value={form.category}
+                      onChange={(e) => update('category', e.target.value)}
+                      className="input-field"
+                    >
+                      {catsLoading ? (
+                        <option value="">Loading categories…</option>
+                      ) : categories.length > 0 ? (
+                        categories.map((c) => (
+                          <option key={c.id} value={c.name}>{c.name}</option>
+                        ))
+                      ) : (
+                        <option value="">No categories found</option>
+                      )}
+                    </select>
+                  </Field>
+                  <Field label="Product Tags" htmlFor="p-tags" hint="Comma separated">
+                    <input
+                      id="p-tags"
+                      value={form.tags}
+                      onChange={(e) => update('tags', e.target.value)}
+                      className="input-field"
+                      placeholder="earbuds, wireless, audio"
+                    />
+                  </Field>
+                </div>
+              </div>
 
-                {imagePreview ? (
-                  <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-                    <div className="flex items-center gap-4 p-4">
-                      <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
-                        <img src={imagePreview} alt="Product preview" className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                        {uploading && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-white/70">
-                            <Loader2 className="h-6 w-6 animate-spin text-[#9f0f0f]" />
+              {/* Sidebar: Product Image + Gallery (WooCommerce-style) */}
+              <div className="space-y-5">
+                {/* Product Image */}
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="mb-3 flex items-center gap-2">
+                    <ImageIcon2 className="h-4 w-4 text-slate-500" />
+                    <h3 className="text-sm font-semibold text-slate-800">Product Image</h3>
+                  </div>
+
+                  {imagePreview ? (
+                    <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                      <div className="flex flex-col items-center gap-3 p-4">
+                        <div className="relative h-28 w-28 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                          <img src={imagePreview} alt="Product preview" className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                          {uploading && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-white/70">
+                              <Loader2 className="h-6 w-6 animate-spin text-[#9f0f0f]" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="w-full">
+                          <p className="text-center text-xs font-medium text-slate-600">
+                            {uploading ? 'Processing…' : 'Image selected'}
+                          </p>
+                          <div className="mt-2 flex items-center justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              disabled={uploading}
+                              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-[#9f0f0f]/30 hover:bg-[#9f0f0f]/5 hover:text-[#9f0f0f] disabled:opacity-50"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" /> Change
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleRemoveImage}
+                              disabled={uploading}
+                              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 transition hover:border-red-200 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" /> Remove
+                            </button>
                           </div>
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-slate-700">
-                          {uploading ? 'Processing image…' : 'Image selected'}
-                        </p>
-                        <p className="mt-0.5 text-xs text-slate-400">
-                          {uploading ? 'Please wait while the image is processed.' : 'Click replace to choose a different image.'}
-                        </p>
-                        <div className="mt-3 flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={uploading}
-                            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-[#9f0f0f]/30 hover:bg-[#9f0f0f]/5 hover:text-[#9f0f0f] disabled:opacity-50"
-                          >
-                            <RefreshCw className="h-3.5 w-3.5" /> Change Image
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleRemoveImage}
-                            disabled={uploading}
-                            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 transition hover:border-red-200 hover:bg-red-50 disabled:opacity-50"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" /> Remove
-                          </button>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  <div
-                    onDrop={handleDrop}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onClick={() => !uploading && fileInputRef.current?.click()}
-                    className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center transition ${
-                      isDragging
-                        ? 'border-[#9f0f0f] bg-[#9f0f0f]/5'
-                        : 'border-slate-300 bg-slate-50 hover:border-[#9f0f0f]/40 hover:bg-[#9f0f0f]/5'
-                    }`}
+                  ) : (
+                    <div
+                      onDrop={handleDrop}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onClick={() => !uploading && fileInputRef.current?.click()}
+                      className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 text-center transition ${
+                        isDragging
+                          ? 'border-[#9f0f0f] bg-[#9f0f0f]/5'
+                          : 'border-slate-300 bg-slate-50 hover:border-[#9f0f0f]/40 hover:bg-[#9f0f0f]/5'
+                      }`}
+                    >
+                      {uploading ? (
+                        <>
+                          <Loader2 className="h-8 w-8 animate-spin text-[#9f0f0f]" />
+                          <p className="mt-3 text-sm font-medium text-slate-600">Processing image…</p>
+                        </>
+                      ) : (
+                        <>
+                          <UploadCloud className="h-8 w-8 text-slate-400" />
+                          <p className="mt-3 text-sm font-medium text-slate-600">Set product image</p>
+                          <p className="mt-0.5 text-xs text-slate-400">Click to upload · PNG, JPG, WEBP</p>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) handleFileSelect(file)
+                    }}
+                  />
+
+                  {uploadError && (
+                    <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 animate-fade-in">
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>{uploadError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setShowUrlInput((s) => !s)}
+                    className="mt-2 flex items-center gap-1.5 text-xs font-medium text-[#9f0f0f] transition hover:text-[#880d0d]"
                   >
-                    {uploading ? (
-                      <>
-                        <Loader2 className="h-8 w-8 animate-spin text-[#9f0f0f]" />
-                        <p className="mt-3 text-sm font-medium text-slate-600">Processing image…</p>
-                      </>
-                    ) : (
-                      <>
-                        <UploadCloud className="h-8 w-8 text-slate-400" />
-                        <p className="mt-3 text-sm font-medium text-slate-600">Drag & drop an image here</p>
-                        <p className="mt-0.5 text-xs text-slate-400">or click to browse · PNG, JPG, WEBP (max 8 MB)</p>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
-                    if (file) handleFileSelect(file)
-                  }}
-                />
-
-                {uploadError && (
-                  <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 animate-fade-in">
-                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    <span>{uploadError}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* URL toggle */}
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setShowUrlInput((s) => !s)}
-                  className="flex items-center gap-1.5 text-xs font-medium text-[#9f0f0f] transition hover:text-[#880d0d]"
-                >
-                  <LinkIcon className="h-3.5 w-3.5" />
-                  {showUrlInput ? 'Hide URL input' : 'Or enter an image URL instead'}
-                </button>
-                {showUrlInput && (
-                  <div className="mt-2 animate-fade-in">
-                    <Field label="Featured Image URL" htmlFor="p-image">
+                    <LinkIcon className="h-3.5 w-3.5" />
+                    {showUrlInput ? 'Hide URL input' : 'Or enter image URL'}
+                  </button>
+                  {showUrlInput && (
+                    <div className="mt-2 animate-fade-in">
                       <input
                         id="p-image"
                         type="url"
@@ -1172,63 +1301,115 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
                           update('imageUrl', e.target.value)
                           setImagePreview(e.target.value)
                         }}
-                        className="input-field"
+                        className="input-field text-sm"
                         placeholder="https://example.com/product.jpg"
                       />
-                    </Field>
-                  </div>
-                )}
-              </div>
+                    </div>
+                  )}
+                </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Category" htmlFor="p-category" hint={isWoo ? 'WooCommerce store' : 'Local catalog'}>
-                  <select
-                    id="p-category"
-                    value={form.category}
-                    onChange={(e) => update('category', e.target.value)}
-                    className="input-field"
+                {/* Product Gallery */}
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="mb-3 flex items-center gap-2">
+                    <ImageIcon2 className="h-4 w-4 text-slate-500" />
+                    <h3 className="text-sm font-semibold text-slate-800">Product Gallery</h3>
+                  </div>
+
+                  {galleryImages.length > 0 && (
+                    <div className="mb-3 grid grid-cols-3 gap-2">
+                      {galleryImages.map((g) => (
+                        <div key={g.id} className="group relative aspect-square overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                          <img src={g.src} alt="Gallery" className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveGalleryImage(g.id)}
+                            className="absolute right-1 top-1 rounded-md bg-white/90 p-1 text-red-500 opacity-0 shadow-sm transition group-hover:opacity-100 hover:bg-red-50"
+                            aria-label="Remove gallery image"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div
+                    onDrop={handleGalleryDrop}
+                    onDragOver={(e) => e.preventDefault()}
+                    onClick={() => !galleryUploading && galleryFileInputRef.current?.click()}
+                    className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-4 text-center transition ${
+                      galleryUploading
+                        ? 'border-[#9f0f0f] bg-[#9f0f0f]/5'
+                        : 'border-slate-300 bg-slate-50 hover:border-[#9f0f0f]/40 hover:bg-[#9f0f0f]/5'
+                    }`}
                   >
-                    {catsLoading ? (
-                      <option value="">Loading categories…</option>
-                    ) : categories.length > 0 ? (
-                      categories.map((c) => (
-                        <option key={c.id} value={c.name}>{c.name}</option>
-                      ))
+                    {galleryUploading ? (
+                      <>
+                        <Loader2 className="h-6 w-6 animate-spin text-[#9f0f0f]" />
+                        <p className="mt-2 text-xs font-medium text-slate-600">Processing…</p>
+                      </>
                     ) : (
-                      <option value="">No categories found</option>
+                      <>
+                        <Plus className="h-6 w-6 text-slate-400" />
+                        <p className="mt-2 text-xs font-medium text-slate-600">Add product gallery images</p>
+                        <p className="mt-0.5 text-xs text-slate-400">Click to upload or drag & drop</p>
+                      </>
                     )}
-                  </select>
-                </Field>
-                <Field label="Product Tags" htmlFor="p-tags" hint="Comma separated">
+                  </div>
+
                   <input
-                    id="p-tags"
-                    value={form.tags}
-                    onChange={(e) => update('tags', e.target.value)}
-                    className="input-field"
-                    placeholder="earbuds, wireless, audio"
+                    ref={galleryFileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) handleGalleryFileSelect(file)
+                      if (galleryFileInputRef.current) galleryFileInputRef.current.value = ''
+                    }}
                   />
-                </Field>
+
+                  {galleryError && (
+                    <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 animate-fade-in">
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>{galleryError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setShowGalleryUrlInput((s) => !s)}
+                    className="mt-2 flex items-center gap-1.5 text-xs font-medium text-[#9f0f0f] transition hover:text-[#880d0d]"
+                  >
+                    <LinkIcon className="h-3.5 w-3.5" />
+                    {showGalleryUrlInput ? 'Hide URL input' : 'Or enter image URL'}
+                  </button>
+                  {showGalleryUrlInput && (
+                    <div className="mt-2 flex items-center gap-2 animate-fade-in">
+                      <input
+                        type="url"
+                        value={galleryUrlInput}
+                        onChange={(e) => setGalleryUrlInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            handleAddGalleryUrl()
+                          }
+                        }}
+                        className="input-field text-sm"
+                        placeholder="https://example.com/gallery.jpg"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddGalleryUrl}
+                        className="shrink-0 rounded-lg bg-[#9f0f0f] px-3 py-2 text-xs font-medium text-white transition hover:bg-[#880d0d]"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-              <Field label="Short Description" htmlFor="p-desc">
-                <textarea
-                  id="p-desc"
-                  value={form.description}
-                  onChange={(e) => update('description', e.target.value)}
-                  rows={2}
-                  className="input-field resize-none"
-                  placeholder="Brief description shown on product listing…"
-                />
-              </Field>
-              <Field label="Full Description" htmlFor="p-full-desc">
-                <textarea
-                  id="p-full-desc"
-                  value={form.fullDescription}
-                  onChange={(e) => update('fullDescription', e.target.value)}
-                  rows={4}
-                  className="input-field resize-none"
-                  placeholder="Full product description shown on the product page…"
-                />
-              </Field>
             </div>
           )}
 

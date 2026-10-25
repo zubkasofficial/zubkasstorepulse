@@ -79,6 +79,7 @@ export type Product = {
   unitsSold: number
   image: string
   imageUrl: string
+  galleryImages: string[]
   description: string
   type: ProductType
   virtual: boolean

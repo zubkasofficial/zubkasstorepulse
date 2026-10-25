@@ -17,6 +17,7 @@ export type ProductRow = {
   stock_status: string | null
   image_url: string | null
   images: ProductImage[] | string | null
+  gallery_images: unknown
   description: string | null
   attributes: Array<{ id: number; name: string; position: number; visible: boolean; variation: boolean; options: string[] }> | null
   variations: Array<{ id: string; sku: string; price: string; salePrice: string | null; stockStatus: 'instock' | 'outofstock'; attributes: Array<{ name: string; option: string }> }> | null
@@ -80,6 +81,10 @@ export type PosSaleItemRow = {
 /* ---------------- mappers ---------------- */
 
 function extractImageSrc(r: ProductRow): string {
+  // Prefer the text column (reliable for large data URLs), then fall back to
+  // the JSONB images array. Checking images first caused Base64 data URLs to
+  // not render in the product list after save.
+  if (r.image_url && r.image_url.trim()) return r.image_url
   const imgs = r.images
   if (Array.isArray(imgs) && imgs.length > 0) {
     const first = imgs[0]
@@ -87,7 +92,35 @@ function extractImageSrc(r: ProductRow): string {
     if (first && typeof first === 'object' && typeof first.src === 'string') return first.src
   }
   if (typeof imgs === 'string' && imgs.trim()) return imgs
-  return r.image_url ?? ''
+  return ''
+}
+
+function extractGalleryImages(r: ProductRow): string[] {
+  const g = r.gallery_images
+  if (Array.isArray(g)) {
+    return g
+      .map((img: unknown): string => {
+        if (typeof img === 'string') return img
+        if (img && typeof img === 'object' && typeof (img as { src?: unknown }).src === 'string') return (img as { src: string }).src
+        return ''
+      })
+      .filter((s: string) => s.trim() !== '')
+  }
+  if (typeof g === 'string' && g.trim()) {
+    try {
+      const parsed = JSON.parse(g)
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((img: unknown): string =>
+            typeof img === 'string' ? img : (img as { src?: string })?.src ?? ''
+          )
+          .filter((s: string) => s.trim() !== '')
+      }
+    } catch {
+      return [g]
+    }
+  }
+  return []
 }
 
 function extractCategory(r: ProductRow): string {
@@ -113,6 +146,7 @@ function mapProductRow(r: ProductRow): Product {
     unitsSold: 0,
     image: '📦',
     imageUrl: extractImageSrc(r),
+    galleryImages: extractGalleryImages(r),
     description: r.description ?? '',
     type: (r.type === 'variable' || (r.variations && Array.isArray(r.variations) && r.variations.length > 0)) ? 'variable' : 'simple',
     virtual: r.virtual ?? false,
@@ -220,6 +254,7 @@ export type StandaloneProductInput = {
   saleStartDate?: string
   saleEndDate?: string
   imageUrl: string
+  galleryImages?: string[]
   description: string
   fullDescription?: string
   type?: 'simple' | 'variable'
@@ -259,6 +294,7 @@ export async function createStandaloneProduct(input: StandaloneProductInput): Pr
     stock_status: input.stockStatus ?? (input.stockQuantity > 0 ? 'instock' : 'outofstock'),
     image_url: input.imageUrl.trim() || null,
     images: input.imageUrl.trim() ? [{ src: input.imageUrl.trim() }] : [],
+    gallery_images: (input.galleryImages ?? []).map((src) => ({ src })),
     description: input.description.trim(),
     full_description: (input.fullDescription ?? '').trim(),
     type: input.type ?? 'simple',
@@ -319,6 +355,9 @@ export async function updateStandaloneProduct(id: string, input: Partial<Standal
     const url = input.imageUrl.trim()
     patch.image_url = url || null
     patch.images = url ? [{ src: url }] : []
+  }
+  if (input.galleryImages !== undefined) {
+    patch.gallery_images = input.galleryImages.map((src) => ({ src }))
   }
   if (input.description !== undefined) patch.description = input.description.trim()
   if (input.fullDescription !== undefined) patch.full_description = input.fullDescription.trim()

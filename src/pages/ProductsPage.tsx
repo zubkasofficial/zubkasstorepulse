@@ -72,15 +72,43 @@ export default function ProductsPage() {
       const input = {
         name: data.name,
         sku: data.sku,
+        gtin: data.gtin,
         category: data.category,
         regularPrice: data.price,
         salePrice: data.salePrice,
         stockQuantity: data.stock,
+        manageStock: data.manageStock,
+        stockStatus: data.stockStatus,
+        backorders: data.backorders,
+        soldIndividually: data.soldIndividually,
+        unitOfMeasure: data.unitOfMeasure,
+        taxStatus: data.taxStatus,
+        taxClass: data.taxClass,
+        saleStartDate: data.saleStartDate,
+        saleEndDate: data.saleEndDate,
         imageUrl: data.imageUrl,
+        galleryImages: data.galleryImages,
         description: data.description,
+        type: data.type,
+        virtual: data.virtual,
+        downloadable: data.downloadable,
+        downloads: data.downloads,
+        downloadLimit: data.downloadLimit,
+        downloadExpiry: data.downloadExpiry,
         attributes: data.attributes,
         variations: data.variations,
-        type: data.type,
+        tags: data.tags,
+        weight: data.weight,
+        length: data.length,
+        width: data.width,
+        height: data.height,
+        shippingClass: data.shippingClass,
+        upsellIds: data.upsellIds,
+        crossSellIds: data.crossSellIds,
+        purchaseNote: data.purchaseNote,
+        menuOrder: data.menuOrder,
+        reviewsEnabled: data.reviewsEnabled,
+        posAvailable: data.posAvailable,
       }
       try {
         if (id) {
@@ -109,6 +137,7 @@ export default function ProductsPage() {
         soldIndividually: data.soldIndividually,
         unitOfMeasure: data.unitOfMeasure,
         imageUrl: data.imageUrl,
+        galleryImages: data.galleryImages,
         description: data.description,
         type: data.type,
         virtual: data.virtual,
@@ -357,8 +386,16 @@ export default function ProductsPage() {
                                         src={p.imageUrl}
                                         alt={p.name}
                                         className="h-full w-full object-cover"
-                                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                                        onError={(e) => {
+                                          const img = e.target as HTMLImageElement
+                                          img.style.display = 'none'
+                                          const fallback = img.nextElementSibling as HTMLElement | null
+                                          if (fallback) fallback.style.display = ''
+                                        }}
                                       />
+                                    ) : null}
+                                    {p.imageUrl ? (
+                                      <span className="hidden text-lg">{p.image}</span>
                                     ) : (
                                       <span className="text-lg">{p.image}</span>
                                     )}
@@ -492,8 +529,16 @@ export default function ProductsPage() {
                                 src={p.imageUrl}
                                 alt={p.name}
                                 className="h-full w-full object-cover"
-                                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                                onError={(e) => {
+                                  const img = e.target as HTMLImageElement
+                                  img.style.display = 'none'
+                                  const fallback = img.nextElementSibling as HTMLElement | null
+                                  if (fallback) fallback.style.display = ''
+                                }}
                               />
+                            ) : null}
+                            {p.imageUrl ? (
+                              <span className="hidden text-xl">{p.image}</span>
                             ) : (
                               <span className="text-xl">{p.image}</span>
                             )}

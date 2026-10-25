@@ -423,6 +423,7 @@ function mapProduct(p: WooProduct, variations: ProductVariation[] = []): Product
     unitsSold: p.total_sales ?? 0,
     image: '📦',
     imageUrl: p.images?.[0]?.src ?? '',
+    galleryImages: (p.images ?? []).slice(1).map((img) => img.src).filter((s) => s.trim() !== ''),
     description: p.short_description?.replace(/<[^>]*>/g, '') || '',
     fullDescription: p.description?.replace(/<[^>]*>/g, '') || '',
     type: prodType,
@@ -556,6 +557,17 @@ export type UploadedMedia = {
   sourceUrl: string
 }
 
+async function dataUrlToFile(dataUrl: string, productName: string): Promise<File> {
+  const match = dataUrl.match(/^data:(image\/[a-z]+);base64,(.*)$/i)
+  if (!match) throw new Error('Invalid data URL')
+  const mime = match[1]
+  const base64 = match[2]
+  const ext = mime.split('/')[1] || 'png'
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+  const safeName = productName.trim().replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'product'
+  return new File([bytes], `${safeName}.${ext}`, { type: mime })
+}
+
 export async function uploadMediaToWordPress(conn: WooConnection, file: File): Promise<UploadedMedia> {
   const base = normalizeStoreUrl(conn.storeUrl)
   const url = `${base}/wp-json/wp/v2/media`
@@ -679,6 +691,7 @@ export type CreateProductInput = {
   soldIndividually: boolean
   unitOfMeasure: string
   imageUrl: string
+  galleryImages: string[]
   description: string
   type: ProductType
   virtual: boolean
@@ -907,7 +920,7 @@ export async function deleteCoupon(conn: WooConnection, couponId: string): Promi
   await wooFetch(conn, `coupons/${couponId}?force=true`, { method: 'DELETE' })
 }
 
-function buildProductBody(input: CreateProductInput): Record<string, unknown> {
+async function buildProductBody(conn: WooConnection, input: CreateProductInput): Promise<Record<string, unknown>> {
   const body: Record<string, unknown> = {
     name: input.name,
     regular_price: String(input.price),
@@ -946,8 +959,44 @@ function buildProductBody(input: CreateProductInput): Record<string, unknown> {
     body.sale_price = ''
     body.on_sale = false
   }
-  if (input.imageUrl.trim()) {
-    body.images = [{ src: input.imageUrl.trim() }]
+  // Attach the product image. Remote http(s) URLs are passed directly. Base64
+  // data URLs (local file uploads) are uploaded to the WordPress Media Library
+  // so the returned product has a real, displayable image URL — otherwise the
+  // product list shows the default box icon.
+  const trimmedUrl = input.imageUrl.trim()
+  if (trimmedUrl && /^https?:\/\//i.test(trimmedUrl)) {
+    body.images = [{ src: trimmedUrl }]
+  } else if (trimmedUrl && trimmedUrl.startsWith('data:')) {
+    try {
+      const file = await dataUrlToFile(trimmedUrl, input.name)
+      const media = await uploadMediaToWordPress(conn, file)
+      body.images = [{ src: media.sourceUrl }]
+    } catch {
+      // Upload failed — leave images unset so the product still saves.
+    }
+  }
+  // Gallery images: upload data URLs to the Media Library, pass remote URLs
+  // directly. These are appended after the featured image in WooCommerce's
+  // images array (index 0 is the featured image).
+  const gallerySrcs: string[] = []
+  for (const src of input.galleryImages) {
+    const s = src.trim()
+    if (!s) continue
+    if (/^https?:\/\//i.test(s)) {
+      gallerySrcs.push(s)
+    } else if (s.startsWith('data:')) {
+      try {
+        const file = await dataUrlToFile(s, `${input.name}-gallery`)
+        const media = await uploadMediaToWordPress(conn, file)
+        gallerySrcs.push(media.sourceUrl)
+      } catch {
+        // skip failed upload
+      }
+    }
+  }
+  if (gallerySrcs.length > 0) {
+    const featured = (body.images as Array<{ src: string }> | undefined)?.[0]
+    body.images = featured ? [featured, ...gallerySrcs.map((src) => ({ src }))] : gallerySrcs.map((src) => ({ src }))
   }
   if (input.downloadable) {
     body.downloads = input.downloads
@@ -989,7 +1038,7 @@ function buildProductBody(input: CreateProductInput): Record<string, unknown> {
 }
 
 export async function createProduct(conn: WooConnection, input: CreateProductInput): Promise<Product> {
-  const body = buildProductBody(input)
+  const body = await buildProductBody(conn, input)
   const created = await wooFetch<WooProduct>(conn, 'products', {
     method: 'POST',
     body: JSON.stringify(body),
@@ -1049,6 +1098,7 @@ export async function updateProduct(conn: WooConnection, productId: string, inpu
     soldIndividually: input.soldIndividually ?? false,
     unitOfMeasure: input.unitOfMeasure ?? '',
     imageUrl: input.imageUrl ?? '',
+    galleryImages: input.galleryImages ?? [],
     description: input.description ?? '',
     type: input.type ?? 'simple',
     virtual: input.virtual ?? false,
@@ -1077,7 +1127,7 @@ export async function updateProduct(conn: WooConnection, productId: string, inpu
     reviewsEnabled: input.reviewsEnabled ?? true,
     posAvailable: input.posAvailable ?? true,
   }
-  const body = buildProductBody(fullInput)
+  const body = await buildProductBody(conn, fullInput)
   const updated = await wooFetch<WooProduct>(conn, `products/${productId}`, {
     method: 'PUT',
     body: JSON.stringify(body),
