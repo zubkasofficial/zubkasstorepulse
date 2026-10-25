@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { X, Loader as Loader2, Check, Package, Plus, Trash2, DollarSign, Boxes, Download, Layers, Image as ImageIcon2, CloudUpload as UploadCloud, Link as LinkIcon, CircleAlert as AlertCircle, RefreshCw, GitBranch, Truck, Settings } from 'lucide-react'
 import { type Product, type ProductType, type TaxStatus, type Backorders, type DownloadableFile, type ProductAttribute, type ProductVariation } from '@/data/mockData'
 import { useWoo } from '@/auth/WooContext'
-import { fetchCategoriesFromCloud, type Category } from '@/lib/categories'
+import { fetchCategories, type Category } from '@/lib/categories'
 
 type Tab = 'general' | 'inventory' | 'shipping' | 'linked' | 'attributes' | 'variations' | 'advanced' | 'downloads' | 'media'
 
@@ -113,12 +113,13 @@ const TABS: { key: Tab; label: string; icon: React.ComponentType<{ className?: s
 
 export default function AddProductModal({ open, mode, product, appMode, onClose, onSave }: AddProductModalProps) {
   const isWoo = appMode === 'woo'
-  const { pushToast } = useWoo()
+  const { pushToast, connection } = useWoo()
   const [form, setForm] = useState<ProductFormData>(EMPTY_FORM)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [tab, setTab] = useState<Tab>('general')
   const [categories, setCategories] = useState<Category[]>([])
+  const [catsLoading, setCatsLoading] = useState(false)
 
   // Image upload state
   const [imagePreview, setImagePreview] = useState('')
@@ -130,7 +131,9 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
 
   useEffect(() => {
     if (!open) return
-    fetchCategoriesFromCloud().then((cats) => {
+    setCatsLoading(true)
+    fetchCategories(appMode, connection).then((cats) => {
+      setCatsLoading(false)
       const productName = mode === 'edit' && product ? product.category : ''
       const merged = productName && !cats.some((c) => c.name === productName)
         ? [...cats, { id: `local-${Date.now()}`, name: productName, slug: productName.toLowerCase(), createdAt: new Date().toISOString() }]
@@ -139,7 +142,7 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
       if (!mode || mode === 'create') {
         setForm((f) => (f.category ? f : { ...f, category: merged[0]?.name ?? '' }))
       }
-    })
+    }).catch(() => setCatsLoading(false))
     if (mode === 'edit' && product) {
       setForm({
         name: product.name,
@@ -377,8 +380,6 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
     if (t.key === 'downloads') return form.downloadable
     if (t.key === 'attributes') return form.productType === 'variable'
     if (t.key === 'variations') return form.productType === 'variable'
-    if (t.key === 'linked') return isWoo
-    if (t.key === 'advanced') return isWoo
     return true
   })
 
@@ -637,7 +638,6 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
                 >
                   <option value="instock">In stock</option>
                   <option value="outofstock">Out of stock</option>
-                  <option value="onbackorder">On backorder</option>
                 </select>
               </Field>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -915,63 +915,148 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
 
           {tab === 'shipping' && (
             <div className="space-y-4 animate-fade-in">
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Weight (kg)" htmlFor="p-weight" hint="Optional">
-                  <input id="p-weight" type="number" min="0" step="0.01" className="input-field" placeholder="0.5" />
+              <Field label="Weight (kg)" htmlFor="p-weight" hint="Optional">
+                <input
+                  id="p-weight"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.weight}
+                  onChange={(e) => update('weight', e.target.value)}
+                  className="input-field"
+                  placeholder="0.5"
+                />
+              </Field>
+              <div className="grid grid-cols-3 gap-4">
+                <Field label="Length (cm)" htmlFor="p-length" hint="Optional">
+                  <input
+                    id="p-length"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.length}
+                    onChange={(e) => update('length', e.target.value)}
+                    className="input-field"
+                    placeholder="10"
+                  />
                 </Field>
-                <Field label="Dimensions (L×W×H cm)" htmlFor="p-dims" hint="Optional">
-                  <input id="p-dims" className="input-field" placeholder="10 × 10 × 5" />
+                <Field label="Width (cm)" htmlFor="p-width" hint="Optional">
+                  <input
+                    id="p-width"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.width}
+                    onChange={(e) => update('width', e.target.value)}
+                    className="input-field"
+                    placeholder="10"
+                  />
+                </Field>
+                <Field label="Height (cm)" htmlFor="p-height" hint="Optional">
+                  <input
+                    id="p-height"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.height}
+                    onChange={(e) => update('height', e.target.value)}
+                    className="input-field"
+                    placeholder="5"
+                  />
                 </Field>
               </div>
               <Field label="Shipping Class" htmlFor="p-shipping-class">
-                <select id="p-shipping-class" className="input-field">
+                <select
+                  id="p-shipping-class"
+                  value={form.shippingClass}
+                  onChange={(e) => update('shippingClass', e.target.value)}
+                  className="input-field"
+                >
                   <option value="">No shipping class</option>
                   <option value="standard">Standard</option>
                   <option value="express">Express</option>
                   <option value="heavy">Heavy Items</option>
                 </select>
               </Field>
-              <p className="text-xs text-slate-400">Shipping settings apply to physical products. Virtual products are not shipped.</p>
+              {form.virtual && (
+                <p className="text-xs text-slate-400">Virtual products are not shipped — these values are ignored at checkout.</p>
+              )}
             </div>
           )}
 
           {tab === 'linked' && (
             <div className="space-y-4 animate-fade-in">
-              <Field label="Upsells" htmlFor="p-upsells" hint="Optional">
-                <input id="p-upsells" className="input-field" placeholder="Search for products to upsell…" />
+              <Field label="Upsells" htmlFor="p-upsells" hint="Product IDs, comma separated">
+                <input
+                  id="p-upsells"
+                  value={form.upsellIds}
+                  onChange={(e) => update('upsellIds', e.target.value)}
+                  className="input-field"
+                  placeholder="e.g. 12, 45, 78"
+                />
               </Field>
-              <Field label="Cross-sells" htmlFor="p-crosssells" hint="Optional">
-                <input id="p-crosssells" className="input-field" placeholder="Search for products to cross-sell…" />
+              <Field label="Cross-sells" htmlFor="p-crosssells" hint="Product IDs, comma separated">
+                <input
+                  id="p-crosssells"
+                  value={form.crossSellIds}
+                  onChange={(e) => update('crossSellIds', e.target.value)}
+                  className="input-field"
+                  placeholder="e.g. 23, 56"
+                />
               </Field>
-              <Field label="Grouped Products" htmlFor="p-grouped" hint="Optional">
-                <input id="p-grouped" className="input-field" placeholder="Search for products to group…" />
-              </Field>
-              <p className="text-xs text-slate-400">Linked products help customers discover related items in your store.</p>
+              <p className="text-xs text-slate-400">Linked products help customers discover related items in your store. Enter the product IDs of the items you want to upsell or cross-sell.</p>
             </div>
           )}
 
           {tab === 'advanced' && (
             <div className="space-y-4 animate-fade-in">
-              <Field label="Menu Order" htmlFor="p-menu-order" hint="0 = default">
-                <input id="p-menu-order" type="number" min="0" className="input-field" placeholder="0" />
-              </Field>
               <Field label="Purchase Note" htmlFor="p-purchase-note" hint="Optional">
-                <textarea id="p-purchase-note" rows={2} className="input-field resize-none" placeholder="Note shown to customer after purchase…" />
+                <textarea
+                  id="p-purchase-note"
+                  rows={2}
+                  value={form.purchaseNote}
+                  onChange={(e) => update('purchaseNote', e.target.value)}
+                  className="input-field resize-none"
+                  placeholder="Note shown to customer after purchase…"
+                />
               </Field>
-              <Field label="Reviews" htmlFor="p-reviews">
-                <select id="p-reviews" className="input-field">
-                  <option value="enabled">Enabled</option>
-                  <option value="disabled">Disabled</option>
-                </select>
-              </Field>
-              <Field label="Visibility" htmlFor="p-visibility">
-                <select id="p-visibility" className="input-field">
-                  <option value="visible">Publicly visible</option>
-                  <option value="catalog">Catalog only</option>
-                  <option value="search">Search results only</option>
-                  <option value="hidden">Hidden</option>
-                </select>
-              </Field>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Field label="Menu Order" htmlFor="p-menu-order" hint="0 = default">
+                  <input
+                    id="p-menu-order"
+                    type="number"
+                    min="0"
+                    value={form.menuOrder}
+                    onChange={(e) => update('menuOrder', e.target.value)}
+                    className="input-field"
+                    placeholder="0"
+                  />
+                </Field>
+                <Field label="Enable reviews" htmlFor="p-reviews">
+                  <label className="flex h-[42px] cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4">
+                    <input
+                      id="p-reviews"
+                      type="checkbox"
+                      checked={form.reviewsEnabled}
+                      onChange={(e) => update('reviewsEnabled', e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-[#9f0f0f] focus:ring-[#9f0f0f]/20"
+                    />
+                    <span className="text-sm font-medium text-slate-700">Allow customer reviews</span>
+                  </label>
+                </Field>
+              </div>
+              <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={form.posAvailable}
+                  onChange={(e) => update('posAvailable', e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-[#9f0f0f] focus:ring-[#9f0f0f]/20"
+                />
+                <div>
+                  <p className="text-sm font-medium text-slate-800">Available for POS</p>
+                  <p className="text-xs text-slate-400">Show this product on the POS checkout screen</p>
+                </div>
+              </label>
             </div>
           )}
 
@@ -1096,19 +1181,21 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Category" htmlFor="p-category">
+                <Field label="Category" htmlFor="p-category" hint={isWoo ? 'WooCommerce store' : 'Local catalog'}>
                   <select
                     id="p-category"
                     value={form.category}
                     onChange={(e) => update('category', e.target.value)}
                     className="input-field"
                   >
-                    {categories.length > 0 ? (
+                    {catsLoading ? (
+                      <option value="">Loading categories…</option>
+                    ) : categories.length > 0 ? (
                       categories.map((c) => (
                         <option key={c.id} value={c.name}>{c.name}</option>
                       ))
                     ) : (
-                      <option value="">Loading categories…</option>
+                      <option value="">No categories found</option>
                     )}
                   </select>
                 </Field>
