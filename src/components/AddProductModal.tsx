@@ -196,7 +196,7 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
     setShowUrlInput(false)
     setUploading(false)
     setIsDragging(false)
-  }, [open, mode, product])
+  }, [open, mode, product, appMode, connection])
 
   useEffect(() => {
     if (!open) return

@@ -114,7 +114,6 @@ function mapProductRow(r: ProductRow): Product {
     image: '📦',
     imageUrl: extractImageSrc(r),
     description: r.description ?? '',
-    fullDescription: r.description ?? '',
     type: (r.type === 'variable' || (r.variations && Array.isArray(r.variations) && r.variations.length > 0)) ? 'variable' : 'simple',
     virtual: r.virtual ?? false,
     downloadable: r.downloadable ?? false,

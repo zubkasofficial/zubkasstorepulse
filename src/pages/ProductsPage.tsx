@@ -99,12 +99,15 @@ export default function ProductsPage() {
       const input: CreateProductInput = {
         name: data.name,
         sku: data.sku,
+        gtin: data.gtin,
         category: data.category,
         price: data.price,
         salePrice: data.salePrice,
         stock: data.stock,
         manageStock: data.manageStock,
         stockStatus: data.stockStatus,
+        soldIndividually: data.soldIndividually,
+        unitOfMeasure: data.unitOfMeasure,
         imageUrl: data.imageUrl,
         description: data.description,
         type: data.type,
@@ -122,6 +125,17 @@ export default function ProductsPage() {
         variations: data.variations,
         tags: data.tags,
         fullDescription: data.fullDescription,
+        weight: data.weight,
+        length: data.length,
+        width: data.width,
+        height: data.height,
+        shippingClass: data.shippingClass,
+        upsellIds: data.upsellIds,
+        crossSellIds: data.crossSellIds,
+        purchaseNote: data.purchaseNote,
+        menuOrder: data.menuOrder,
+        reviewsEnabled: data.reviewsEnabled,
+        posAvailable: data.posAvailable,
       }
       try {
         if (id) {

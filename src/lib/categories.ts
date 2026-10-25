@@ -10,6 +10,7 @@ export type Category = {
 }
 
 const CACHE_KEY = 'zubkas_categories_cache'
+const WOO_CACHE_KEY = 'zubkas_woo_categories_cache'
 
 function getCached(): Category[] {
   try {
@@ -24,6 +25,24 @@ function getCached(): Category[] {
 function setCached(cats: Category[]): void {
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify(cats))
+  } catch {
+    /* ignore */
+  }
+}
+
+function getWooCached(): Category[] {
+  try {
+    const raw = localStorage.getItem(WOO_CACHE_KEY)
+    if (!raw) return []
+    return JSON.parse(raw) as Category[]
+  } catch {
+    return []
+  }
+}
+
+function setWooCached(cats: Category[]): void {
+  try {
+    localStorage.setItem(WOO_CACHE_KEY, JSON.stringify(cats))
   } catch {
     /* ignore */
   }
@@ -113,7 +132,7 @@ export async function fetchCategoriesFromWooCommerce(conn: WooConnection): Promi
     }
   }
 
-  if (!data) return getCached()
+  if (!data) return getWooCached()
 
   const mapped: Category[] = data.map((c) => ({
     id: `woo-${c.id}`,
@@ -121,15 +140,18 @@ export async function fetchCategoriesFromWooCommerce(conn: WooConnection): Promi
     slug: c.slug,
     createdAt: new Date().toISOString(),
   }))
+  setWooCached(mapped)
   return mapped
 }
 
 export async function fetchCategories(mode: AppMode, connection: WooConnection | null): Promise<Category[]> {
   if (mode === 'woo' && connection) {
+    // Strictly isolated: woo mode only ever returns WooCommerce categories.
+    // On failure, fall back to the woo-only cache (never standalone categories).
     try {
       return await fetchCategoriesFromWooCommerce(connection)
     } catch {
-      return fetchCategoriesFromCloud()
+      return getWooCached()
     }
   }
   return fetchCategoriesFromCloud()

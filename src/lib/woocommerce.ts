@@ -91,7 +91,6 @@ export type WooProduct = {
   weight: string | null
   dimensions: { length: string; width: string; height: string } | null
   shipping_class: string | null
-  sku: string
   global_unique_id: string | null
   sold_individually: boolean
   unit_of_measure: string | null
@@ -1040,12 +1039,15 @@ export async function updateProduct(conn: WooConnection, productId: string, inpu
   const fullInput: CreateProductInput = {
     name: input.name ?? '',
     sku: input.sku ?? '',
+    gtin: input.gtin ?? '',
     category: input.category ?? '',
     price: input.price ?? 0,
     salePrice: input.salePrice ?? null,
     stock: input.stock ?? 0,
     manageStock: input.manageStock ?? false,
     stockStatus: input.stockStatus ?? 'instock',
+    soldIndividually: input.soldIndividually ?? false,
+    unitOfMeasure: input.unitOfMeasure ?? '',
     imageUrl: input.imageUrl ?? '',
     description: input.description ?? '',
     type: input.type ?? 'simple',
@@ -1063,6 +1065,17 @@ export async function updateProduct(conn: WooConnection, productId: string, inpu
     variations: input.variations ?? [],
     tags: input.tags ?? [],
     fullDescription: input.fullDescription ?? '',
+    weight: input.weight ?? '',
+    length: input.length ?? '',
+    width: input.width ?? '',
+    height: input.height ?? '',
+    shippingClass: input.shippingClass ?? '',
+    upsellIds: input.upsellIds ?? [],
+    crossSellIds: input.crossSellIds ?? [],
+    purchaseNote: input.purchaseNote ?? '',
+    menuOrder: input.menuOrder ?? 0,
+    reviewsEnabled: input.reviewsEnabled ?? true,
+    posAvailable: input.posAvailable ?? true,
   }
   const body = buildProductBody(fullInput)
   const updated = await wooFetch<WooProduct>(conn, `products/${productId}`, {
