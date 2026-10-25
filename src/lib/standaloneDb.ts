@@ -410,6 +410,7 @@ export async function upsertDelivery(record: DeliveryRecord): Promise<void> {
   const sb = getSupabase()
   if (!sb) return
   const orderId = await resolveOrderId(record.orderNumber)
+  const nowIso = new Date().toISOString()
   const row = {
     order_id: orderId,
     order_number: record.orderNumber,
@@ -423,12 +424,30 @@ export async function upsertDelivery(record: DeliveryRecord): Promise<void> {
     staff_name: record.staffName ?? null,
     signature: record.signature ?? null,
     completed_at: record.completedAt ?? null,
-    updated_at: new Date().toISOString(),
+    updated_at: nowIso,
   }
-  const { error } = await sb
+
+  // Check if a delivery row already exists for this order number
+  const { data: existing, error: selectErr } = await sb
     .from('deliveries')
-    .upsert(row, { onConflict: 'order_number' })
-  if (error) throw new Error(error.message)
+    .select('id')
+    .eq('order_number', record.orderNumber)
+    .maybeSingle()
+
+  if (selectErr) throw new Error(selectErr.message)
+
+  if (existing) {
+    const { error: updateErr } = await sb
+      .from('deliveries')
+      .update(row)
+      .eq('id', (existing as { id: string }).id)
+    if (updateErr) throw new Error(updateErr.message)
+  } else {
+    const { error: insertErr } = await sb
+      .from('deliveries')
+      .insert(row)
+    if (insertErr) throw new Error(insertErr.message)
+  }
 }
 
 export async function fetchDeliveryByOrderNumber(orderNumber: string): Promise<DeliveryRecord | null> {
