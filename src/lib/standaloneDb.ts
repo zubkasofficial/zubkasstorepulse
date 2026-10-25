@@ -366,11 +366,20 @@ export async function updateStandaloneOrderStatus(orderId: string, status: Order
   const sb = getSupabase()
   if (!sb) return
   const orderNumber = orderId.replace(/^#/, '')
-  const { error } = await sb
+
+  // Update pos_sales (POS-created orders)
+  const { error: posErr } = await sb
     .from('pos_sales')
     .update({ status })
     .eq('order_number', orderNumber)
-  if (error) throw new Error(error.message)
+  if (posErr) throw new Error(posErr.message)
+
+  // Also update orders table if a matching row exists (WooCommerce-synced or duplicated orders)
+  const { error: ordersErr } = await sb
+    .from('orders')
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq('order_number', orderNumber)
+  if (ordersErr) throw new Error(ordersErr.message)
 }
 
 /* ---------------- deliveries sync ---------------- */
