@@ -71,6 +71,7 @@ export type Product = {
   id: string
   name: string
   sku: string
+  gtin: string
   category: string
   price: number
   salePrice: number | null
@@ -85,6 +86,8 @@ export type Product = {
   manageStock: boolean
   stockStatus: 'instock' | 'outofstock'
   backorders: Backorders
+  soldIndividually: boolean
+  unitOfMeasure: string
   taxStatus: TaxStatus
   taxClass: string
   saleStartDate: string
@@ -96,6 +99,17 @@ export type Product = {
   variations: ProductVariation[]
   tags: string[]
   fullDescription: string
+  weight: string
+  length: string
+  width: string
+  height: string
+  shippingClass: string
+  upsellIds: string[]
+  crossSellIds: string[]
+  purchaseNote: string
+  menuOrder: number
+  reviewsEnabled: boolean
+  posAvailable: boolean
 }
 
 export const PRODUCT_CATEGORIES = ['Electronics', 'Wearables', 'Home & Living', 'Accessories']

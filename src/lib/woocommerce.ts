@@ -88,6 +88,18 @@ export type WooProduct = {
   images: Array<{ src: string; name: string }>
   short_description: string
   description: string
+  weight: string | null
+  dimensions: { length: string; width: string; height: string } | null
+  shipping_class: string | null
+  sku: string
+  global_unique_id: string | null
+  sold_individually: boolean
+  unit_of_measure: string | null
+  upsell_ids: number[]
+  cross_sell_ids: number[]
+  purchase_note: string
+  menu_order: number
+  reviews_allowed: boolean
   attributes: Array<{
     id: number
     name: string
@@ -404,6 +416,7 @@ function mapProduct(p: WooProduct, variations: ProductVariation[] = []): Product
     id: String(p.id),
     name: p.name,
     sku: p.sku || `SKU-${p.id}`,
+    gtin: p.global_unique_id ?? '',
     category,
     price,
     salePrice: sale,
@@ -419,6 +432,8 @@ function mapProduct(p: WooProduct, variations: ProductVariation[] = []): Product
     manageStock: p.manage_stock ?? false,
     stockStatus: p.stock_status === 'outofstock' ? 'outofstock' : 'instock',
     backorders: (['no', 'notify', 'yes'].includes(p.backorders) ? p.backorders : 'no') as Backorders,
+    soldIndividually: !!p.sold_individually,
+    unitOfMeasure: p.unit_of_measure ?? '',
     taxStatus: (['taxable', 'none'].includes(p.tax_status) ? p.tax_status : 'taxable') as TaxStatus,
     taxClass: p.tax_class || '',
     saleStartDate: p.date_on_sale_from ?? '',
@@ -436,6 +451,17 @@ function mapProduct(p: WooProduct, variations: ProductVariation[] = []): Product
     })),
     variations,
     tags: (p.tags ?? []).map((t) => t.name),
+    weight: p.weight ?? '',
+    length: p.dimensions?.length ?? '',
+    width: p.dimensions?.width ?? '',
+    height: p.dimensions?.height ?? '',
+    shippingClass: p.shipping_class ?? '',
+    upsellIds: (p.upsell_ids ?? []).map(String),
+    crossSellIds: (p.cross_sell_ids ?? []).map(String),
+    purchaseNote: p.purchase_note ?? '',
+    menuOrder: p.menu_order ?? 0,
+    reviewsEnabled: p.reviews_allowed !== false,
+    posAvailable: true,
   }
 }
 
@@ -644,12 +670,15 @@ export async function completeOrderDelivery(conn: WooConnection, orderId: string
 export type CreateProductInput = {
   name: string
   sku: string
+  gtin: string
   category: string
   price: number
   salePrice: number | null
   stock: number
   manageStock: boolean
   stockStatus: 'instock' | 'outofstock'
+  soldIndividually: boolean
+  unitOfMeasure: string
   imageUrl: string
   description: string
   type: ProductType
@@ -667,6 +696,17 @@ export type CreateProductInput = {
   variations: ProductVariation[]
   tags: string[]
   fullDescription: string
+  weight: string
+  length: string
+  width: string
+  height: string
+  shippingClass: string
+  upsellIds: string[]
+  crossSellIds: string[]
+  purchaseNote: string
+  menuOrder: number
+  reviewsEnabled: boolean
+  posAvailable: boolean
 }
 
 export type PosCartLine = {
@@ -925,6 +965,26 @@ function buildProductBody(input: CreateProductInput): Record<string, unknown> {
       variation: a.variation,
       options: a.options,
     }))
+  }
+  if (input.weight.trim()) body.weight = input.weight.trim()
+  const dims: Record<string, string> = {}
+  if (input.length.trim()) dims.length = input.length.trim()
+  if (input.width.trim()) dims.width = input.width.trim()
+  if (input.height.trim()) dims.height = input.height.trim()
+  if (Object.keys(dims).length > 0) body.dimensions = dims
+  if (input.shippingClass.trim()) body.shipping_class = input.shippingClass.trim()
+  if (input.gtin.trim()) body.global_unique_id = input.gtin.trim()
+  if (input.soldIndividually) body.sold_individually = true
+  if (input.unitOfMeasure.trim()) body.unit_of_measure = input.unitOfMeasure.trim()
+  if (input.upsellIds.length > 0) body.upsell_ids = input.upsellIds.map(Number).filter((n) => !isNaN(n))
+  if (input.crossSellIds.length > 0) body.cross_sell_ids = input.crossSellIds.map(Number).filter((n) => !isNaN(n))
+  if (input.purchaseNote.trim()) body.purchase_note = input.purchaseNote.trim()
+  if (input.menuOrder > 0) body.menu_order = input.menuOrder
+  body.reviews_allowed = input.reviewsEnabled
+  if (!input.posAvailable) {
+    body.meta_data = [{ key: '_zubkas_pos_available', value: '0' }]
+  } else {
+    body.meta_data = [{ key: '_zubkas_pos_available', value: '1' }]
   }
   return body
 }

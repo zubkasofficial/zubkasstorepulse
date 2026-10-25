@@ -9,6 +9,7 @@ type Tab = 'general' | 'inventory' | 'shipping' | 'linked' | 'attributes' | 'var
 type ProductFormData = {
   name: string
   sku: string
+  gtin: string
   category: string
   price: string
   salePrice: string
@@ -20,6 +21,8 @@ type ProductFormData = {
   manageStock: boolean
   stockStatus: 'instock' | 'outofstock'
   backorders: Backorders
+  soldIndividually: boolean
+  unitOfMeasure: string
   productType: ProductType
   virtual: boolean
   downloadable: boolean
@@ -32,6 +35,17 @@ type ProductFormData = {
   tags: string
   description: string
   fullDescription: string
+  weight: string
+  length: string
+  width: string
+  height: string
+  shippingClass: string
+  upsellIds: string
+  crossSellIds: string
+  purchaseNote: string
+  menuOrder: string
+  reviewsEnabled: boolean
+  posAvailable: boolean
 }
 
 type AddProductModalProps = {
@@ -46,6 +60,7 @@ type AddProductModalProps = {
 const EMPTY_FORM: ProductFormData = {
   name: '',
   sku: '',
+  gtin: '',
   category: '',
   price: '',
   salePrice: '',
@@ -57,6 +72,8 @@ const EMPTY_FORM: ProductFormData = {
   manageStock: true,
   stockStatus: 'instock',
   backorders: 'no',
+  soldIndividually: false,
+  unitOfMeasure: '',
   productType: 'simple',
   virtual: false,
   downloadable: false,
@@ -69,6 +86,17 @@ const EMPTY_FORM: ProductFormData = {
   tags: '',
   description: '',
   fullDescription: '',
+  weight: '',
+  length: '',
+  width: '',
+  height: '',
+  shippingClass: '',
+  upsellIds: '',
+  crossSellIds: '',
+  purchaseNote: '',
+  menuOrder: '0',
+  reviewsEnabled: true,
+  posAvailable: true,
 }
 
 const TABS: { key: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -116,6 +144,7 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
       setForm({
         name: product.name,
         sku: product.sku,
+        gtin: product.gtin,
         category: product.category,
         price: String(product.price),
         salePrice: product.salePrice !== null ? String(product.salePrice) : '',
@@ -127,6 +156,8 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
         manageStock: product.manageStock,
         stockStatus: product.stockStatus,
         backorders: product.backorders,
+        soldIndividually: product.soldIndividually,
+        unitOfMeasure: product.unitOfMeasure,
         productType: product.type,
         virtual: product.virtual,
         downloadable: product.downloadable,
@@ -139,6 +170,17 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
         tags: product.tags.join(', '),
         description: product.description,
         fullDescription: product.fullDescription,
+        weight: product.weight,
+        length: product.length,
+        width: product.width,
+        height: product.height,
+        shippingClass: product.shippingClass,
+        upsellIds: product.upsellIds.join(', '),
+        crossSellIds: product.crossSellIds.join(', '),
+        purchaseNote: product.purchaseNote,
+        menuOrder: String(product.menuOrder),
+        reviewsEnabled: product.reviewsEnabled,
+        posAvailable: product.posAvailable,
       })
       setImagePreview(product.imageUrl)
     } else {
@@ -215,6 +257,7 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
         {
           name: form.name.trim(),
           sku: form.sku.trim(),
+          gtin: form.gtin.trim(),
           category: form.category,
           price: Number(form.price),
           salePrice: form.salePrice.trim() ? Number(form.salePrice) : null,
@@ -222,6 +265,8 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
           manageStock: form.manageStock,
           stockStatus: form.stockStatus,
           backorders: form.backorders,
+          soldIndividually: form.soldIndividually,
+          unitOfMeasure: form.unitOfMeasure.trim(),
           type: form.productType,
           virtual: form.virtual,
           downloadable: form.downloadable,
@@ -239,6 +284,17 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
           imageUrl: form.imageUrl.trim(),
           description: form.description.trim(),
           fullDescription: form.fullDescription.trim(),
+          weight: form.weight.trim(),
+          length: form.length.trim(),
+          width: form.width.trim(),
+          height: form.height.trim(),
+          shippingClass: form.shippingClass,
+          upsellIds: form.upsellIds.split(',').map((t) => t.trim()).filter(Boolean),
+          crossSellIds: form.crossSellIds.split(',').map((t) => t.trim()).filter(Boolean),
+          purchaseNote: form.purchaseNote.trim(),
+          menuOrder: Number(form.menuOrder) || 0,
+          reviewsEnabled: form.reviewsEnabled,
+          posAvailable: form.posAvailable,
         },
         mode === 'edit' ? product?.id : undefined,
       )
@@ -508,21 +564,31 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
 
           {tab === 'inventory' && (
             <div className="space-y-4 animate-fade-in">
-              <Field label="SKU" htmlFor="p-sku" error={errors.sku}>
-                <input
-                  id="p-sku"
-                  value={form.sku}
-                  onChange={(e) => update('sku', e.target.value)}
-                  className="input-field font-mono text-sm"
-                  placeholder="SKU-XXX-000"
-                />
-              </Field>
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="SKU" htmlFor="p-sku" error={errors.sku}>
+                  <input
+                    id="p-sku"
+                    value={form.sku}
+                    onChange={(e) => update('sku', e.target.value)}
+                    className="input-field font-mono text-sm"
+                    placeholder="SKU-XXX-000"
+                  />
+                </Field>
+                <Field label="GTIN / UPC / ISBN" htmlFor="p-gtin" hint="Optional">
+                  <input
+                    id="p-gtin"
+                    value={form.gtin}
+                    onChange={(e) => update('gtin', e.target.value)}
+                    className="input-field font-mono text-sm"
+                    placeholder="e.g. 012345678905"
+                  />
+                </Field>
+              </div>
               <label className="flex cursor-pointer items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <Package className="h-4 w-4 text-slate-400" />
+                <div className="flex items-center gap-2">\n                  <Package className="h-4 w-4 text-slate-400" />
                   <div>
-                    <p className="text-sm font-medium text-slate-800">Manage Stock</p>
-                    <p className="text-xs text-slate-400">Track stock quantity at product level</p>
+                    <p className="text-sm font-medium text-slate-800">Track stock quantity for this product</p>
+                    <p className="text-xs text-slate-400">Enable stock management at the product level</p>
                   </div>
                 </div>
                 <button
@@ -537,7 +603,7 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
               </label>
               {form.manageStock && (
                 <div className="grid grid-cols-2 gap-4 animate-fade-in">
-                  <Field label="Stock Quantity" htmlFor="p-stock" error={errors.stock}>
+                  <Field label="Initial number in stock" htmlFor="p-stock" error={errors.stock}>
                     <input
                       id="p-stock"
                       type="number"
@@ -562,17 +628,38 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
                   </Field>
                 </div>
               )}
-              <Field label="Stock Status" htmlFor="p-stock-status">
+              <Field label="Stock status" htmlFor="p-stock-status">
                 <select
                   id="p-stock-status"
                   value={form.stockStatus}
                   onChange={(e) => update('stockStatus', e.target.value as 'instock' | 'outofstock')}
                   className="input-field"
                 >
-                  <option value="instock">In Stock</option>
-                  <option value="outofstock">Out of Stock</option>
+                  <option value="instock">In stock</option>
+                  <option value="outofstock">Out of stock</option>
+                  <option value="onbackorder">On backorder</option>
                 </select>
               </Field>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={form.soldIndividually}
+                    onChange={(e) => update('soldIndividually', e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-[#9f0f0f] focus:ring-[#9f0f0f]/20"
+                  />
+                  <span className="text-sm font-medium text-slate-700">Sold individually</span>
+                </label>
+                <Field label="Unit of measure" htmlFor="p-unit" hint="Optional">
+                  <input
+                    id="p-unit"
+                    value={form.unitOfMeasure}
+                    onChange={(e) => update('unitOfMeasure', e.target.value)}
+                    className="input-field"
+                    placeholder="e.g. pcs, kg, litre"
+                  />
+                </Field>
+              </div>
             </div>
           )}
 

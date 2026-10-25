@@ -1,5 +1,5 @@
 import { getSupabase } from '@/lib/supabase'
-import type { Product, Order, OrderStatus, OrderLineItem } from '@/data/mockData'
+import type { Product, Order, OrderStatus, OrderLineItem, Backorders, TaxStatus } from '@/data/mockData'
 
 /* ---------------- row types ---------------- */
 
@@ -20,6 +20,34 @@ export type ProductRow = {
   description: string | null
   attributes: Array<{ id: number; name: string; position: number; visible: boolean; variation: boolean; options: string[] }> | null
   variations: Array<{ id: string; sku: string; price: string; salePrice: string | null; stockStatus: 'instock' | 'outofstock'; attributes: Array<{ name: string; option: string }> }> | null
+  type: string | null
+  virtual: boolean | null
+  downloadable: boolean | null
+  manage_stock: boolean | null
+  backorders: string | null
+  tax_status: string | null
+  tax_class: string | null
+  sale_start_date: string | null
+  sale_end_date: string | null
+  downloads: Array<{ id: string; name: string; file: string }> | null
+  download_limit: number | null
+  download_expiry: number | null
+  tags: string | null
+  full_description: string | null
+  weight: string | null
+  length: string | null
+  width: string | null
+  height: string | null
+  shipping_class: string | null
+  gtin: string | null
+  sold_individually: boolean | null
+  unit_of_measure: string | null
+  upsell_ids: string[] | null
+  cross_sell_ids: string[] | null
+  purchase_note: string | null
+  menu_order: number | null
+  reviews_enabled: boolean | null
+  pos_available: boolean | null
   created_at: string
   updated_at: string
 }
@@ -87,21 +115,23 @@ function mapProductRow(r: ProductRow): Product {
     imageUrl: extractImageSrc(r),
     description: r.description ?? '',
     fullDescription: r.description ?? '',
-    type: (r.variations && Array.isArray(r.variations) && r.variations.length > 0) ? 'variable' : 'simple',
-    virtual: false,
-    downloadable: false,
-    manageStock: true,
+    type: (r.type === 'variable' || (r.variations && Array.isArray(r.variations) && r.variations.length > 0)) ? 'variable' : 'simple',
+    virtual: r.virtual ?? false,
+    downloadable: r.downloadable ?? false,
+    manageStock: r.manage_stock ?? true,
     stockStatus: (r.stock_status === 'instock' || r.stock_status === 'outofstock')
       ? (r.stock_status as 'instock' | 'outofstock')
       : (stockQty > 0 ? 'instock' : 'outofstock'),
-    backorders: 'no',
-    taxStatus: 'taxable',
-    taxClass: '',
-    saleStartDate: '',
-    saleEndDate: '',
-    downloads: [],
-    downloadLimit: 0,
-    downloadExpiry: 0,
+    backorders: (['no', 'notify', 'yes'].includes(r.backorders ?? '') ? (r.backorders as Backorders) : 'no'),
+    soldIndividually: r.sold_individually ?? false,
+    unitOfMeasure: r.unit_of_measure ?? '',
+    taxStatus: (r.tax_status === 'taxable' || r.tax_status === 'none') ? (r.tax_status as TaxStatus) : 'taxable',
+    taxClass: r.tax_class ?? '',
+    saleStartDate: r.sale_start_date ?? '',
+    saleEndDate: r.sale_end_date ?? '',
+    downloads: Array.isArray(r.downloads) ? r.downloads : [],
+    downloadLimit: r.download_limit ?? 0,
+    downloadExpiry: r.download_expiry ?? 0,
     attributes: Array.isArray(r.attributes) ? r.attributes : [],
     variations: Array.isArray(r.variations)
       ? r.variations.map((v) => ({
@@ -113,7 +143,20 @@ function mapProductRow(r: ProductRow): Product {
           attributes: v.attributes,
         }))
       : [],
-    tags: [],
+    tags: r.tags ? r.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
+    fullDescription: r.full_description ?? '',
+    weight: r.weight ?? '',
+    length: r.length ?? '',
+    width: r.width ?? '',
+    height: r.height ?? '',
+    shippingClass: r.shipping_class ?? '',
+    gtin: r.gtin ?? '',
+    upsellIds: Array.isArray(r.upsell_ids) ? r.upsell_ids : [],
+    crossSellIds: Array.isArray(r.cross_sell_ids) ? r.cross_sell_ids : [],
+    purchaseNote: r.purchase_note ?? '',
+    menuOrder: r.menu_order ?? 0,
+    reviewsEnabled: r.reviews_enabled ?? true,
+    posAvailable: r.pos_available ?? true,
   }
 }
 
@@ -163,15 +206,43 @@ export async function fetchStandaloneProducts(): Promise<Product[]> {
 export type StandaloneProductInput = {
   name: string
   sku: string
+  gtin?: string
   category: string
   regularPrice: number
   salePrice: number | null
   stockQuantity: number
+  manageStock?: boolean
+  stockStatus?: 'instock' | 'outofstock'
+  backorders?: Backorders
+  soldIndividually?: boolean
+  unitOfMeasure?: string
+  taxStatus?: TaxStatus
+  taxClass?: string
+  saleStartDate?: string
+  saleEndDate?: string
   imageUrl: string
   description: string
+  fullDescription?: string
+  type?: 'simple' | 'variable'
+  virtual?: boolean
+  downloadable?: boolean
+  downloads?: Array<{ id: string; name: string; file: string }>
+  downloadLimit?: number
+  downloadExpiry?: number
   attributes?: Array<{ id: number; name: string; position: number; visible: boolean; variation: boolean; options: string[] }>
   variations?: Array<{ id: string; sku: string; price: string; salePrice: string | null; stockStatus: 'instock' | 'outofstock'; attributes: Array<{ name: string; option: string }> }>
-  type?: 'simple' | 'variable'
+  tags?: string[]
+  weight?: string
+  length?: string
+  width?: string
+  height?: string
+  shippingClass?: string
+  upsellIds?: string[]
+  crossSellIds?: string[]
+  purchaseNote?: string
+  menuOrder?: number
+  reviewsEnabled?: boolean
+  posAvailable?: boolean
 }
 
 export async function createStandaloneProduct(input: StandaloneProductInput): Promise<Product> {
@@ -180,17 +251,45 @@ export async function createStandaloneProduct(input: StandaloneProductInput): Pr
   const row = {
     name: input.name.trim(),
     sku: input.sku.trim(),
+    gtin: (input.gtin ?? '').trim(),
     category: input.category.trim() || 'Uncategorized',
     categories: input.category.trim() || 'Uncategorized',
     regular_price: input.regularPrice,
     sale_price: input.salePrice,
     stock_quantity: input.stockQuantity,
-    stock_status: input.stockQuantity > 0 ? 'instock' : 'outofstock',
+    stock_status: input.stockStatus ?? (input.stockQuantity > 0 ? 'instock' : 'outofstock'),
     image_url: input.imageUrl.trim() || null,
     images: input.imageUrl.trim() ? [{ src: input.imageUrl.trim() }] : [],
     description: input.description.trim(),
+    full_description: (input.fullDescription ?? '').trim(),
+    type: input.type ?? 'simple',
+    virtual: input.virtual ?? false,
+    downloadable: input.downloadable ?? false,
+    manage_stock: input.manageStock ?? true,
+    backorders: input.backorders ?? 'no',
+    sold_individually: input.soldIndividually ?? false,
+    unit_of_measure: (input.unitOfMeasure ?? '').trim(),
+    tax_status: input.taxStatus ?? 'taxable',
+    tax_class: (input.taxClass ?? '').trim(),
+    sale_start_date: input.saleStartDate || null,
+    sale_end_date: input.saleEndDate || null,
+    downloads: input.downloadable ? (input.downloads ?? []) : [],
+    download_limit: input.downloadable ? (input.downloadLimit ?? 0) : 0,
+    download_expiry: input.downloadable ? (input.downloadExpiry ?? 0) : 0,
     attributes: input.attributes ?? [],
     variations: input.variations ?? [],
+    tags: (input.tags ?? []).join(', '),
+    weight: (input.weight ?? '').trim(),
+    length: (input.length ?? '').trim(),
+    width: (input.width ?? '').trim(),
+    height: (input.height ?? '').trim(),
+    shipping_class: (input.shippingClass ?? '').trim(),
+    upsell_ids: input.upsellIds ?? [],
+    cross_sell_ids: input.crossSellIds ?? [],
+    purchase_note: (input.purchaseNote ?? '').trim(),
+    menu_order: input.menuOrder ?? 0,
+    reviews_enabled: input.reviewsEnabled ?? true,
+    pos_available: input.posAvailable ?? true,
   }
   const { data, error } = await sb.from('products').insert(row).select('*').single()
   if (error) throw new Error(error.message)
@@ -203,6 +302,7 @@ export async function updateStandaloneProduct(id: string, input: Partial<Standal
   const patch: Record<string, unknown> = {}
   if (input.name !== undefined) patch.name = input.name.trim()
   if (input.sku !== undefined) patch.sku = input.sku.trim()
+  if (input.gtin !== undefined) patch.gtin = input.gtin.trim()
   if (input.category !== undefined) {
     const cat = input.category.trim() || 'Uncategorized'
     patch.category = cat
@@ -212,7 +312,9 @@ export async function updateStandaloneProduct(id: string, input: Partial<Standal
   if (input.salePrice !== undefined) patch.sale_price = input.salePrice
   if (input.stockQuantity !== undefined) {
     patch.stock_quantity = input.stockQuantity
-    patch.stock_status = input.stockQuantity > 0 ? 'instock' : 'outofstock'
+    patch.stock_status = input.stockStatus ?? (input.stockQuantity > 0 ? 'instock' : 'outofstock')
+  } else if (input.stockStatus !== undefined) {
+    patch.stock_status = input.stockStatus
   }
   if (input.imageUrl !== undefined) {
     const url = input.imageUrl.trim()
@@ -220,8 +322,35 @@ export async function updateStandaloneProduct(id: string, input: Partial<Standal
     patch.images = url ? [{ src: url }] : []
   }
   if (input.description !== undefined) patch.description = input.description.trim()
+  if (input.fullDescription !== undefined) patch.full_description = input.fullDescription.trim()
+  if (input.type !== undefined) patch.type = input.type
+  if (input.virtual !== undefined) patch.virtual = input.virtual
+  if (input.downloadable !== undefined) patch.downloadable = input.downloadable
+  if (input.manageStock !== undefined) patch.manage_stock = input.manageStock
+  if (input.backorders !== undefined) patch.backorders = input.backorders
+  if (input.soldIndividually !== undefined) patch.sold_individually = input.soldIndividually
+  if (input.unitOfMeasure !== undefined) patch.unit_of_measure = input.unitOfMeasure.trim()
+  if (input.taxStatus !== undefined) patch.tax_status = input.taxStatus
+  if (input.taxClass !== undefined) patch.tax_class = input.taxClass.trim()
+  if (input.saleStartDate !== undefined) patch.sale_start_date = input.saleStartDate || null
+  if (input.saleEndDate !== undefined) patch.sale_end_date = input.saleEndDate || null
+  if (input.downloads !== undefined) patch.downloads = input.downloads
+  if (input.downloadLimit !== undefined) patch.download_limit = input.downloadLimit
+  if (input.downloadExpiry !== undefined) patch.download_expiry = input.downloadExpiry
   if (input.attributes !== undefined) patch.attributes = input.attributes
   if (input.variations !== undefined) patch.variations = input.variations
+  if (input.tags !== undefined) patch.tags = input.tags.join(', ')
+  if (input.weight !== undefined) patch.weight = input.weight.trim()
+  if (input.length !== undefined) patch.length = input.length.trim()
+  if (input.width !== undefined) patch.width = input.width.trim()
+  if (input.height !== undefined) patch.height = input.height.trim()
+  if (input.shippingClass !== undefined) patch.shipping_class = input.shippingClass.trim()
+  if (input.upsellIds !== undefined) patch.upsell_ids = input.upsellIds
+  if (input.crossSellIds !== undefined) patch.cross_sell_ids = input.crossSellIds
+  if (input.purchaseNote !== undefined) patch.purchase_note = input.purchaseNote.trim()
+  if (input.menuOrder !== undefined) patch.menu_order = input.menuOrder
+  if (input.reviewsEnabled !== undefined) patch.reviews_enabled = input.reviewsEnabled
+  if (input.posAvailable !== undefined) patch.pos_available = input.posAvailable
   const { data, error } = await sb.from('products').update(patch).eq('id', id).select('*').single()
   if (error) throw new Error(error.message)
   return mapProductRow(data as ProductRow)
