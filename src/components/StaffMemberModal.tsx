@@ -1,20 +1,22 @@
 import { useEffect, useState } from 'react'
-import { X, Loader as Loader2, Check, User, Eye, EyeOff, Mail, Phone, Lock, ShieldCheck, Store, Bike, CircleAlert as AlertCircle } from 'lucide-react'
-import { type Role, type AccountStatus } from '@/services/auth'
+import { X, Loader as Loader2, Check, User, Eye, EyeOff, Mail, Phone, Lock, ShieldCheck, CircleAlert as AlertCircle } from 'lucide-react'
+import { type AccountStatus } from '@/services/auth'
+import { roleValueForName, type CustomRole } from '@/lib/staffUsers'
 
 type StaffMemberModalProps = {
   open: boolean
   mode: 'create' | 'edit'
-  member?: { id: string; name: string; email: string; password: string; role: Role; phone: string; status: AccountStatus; createdAt: string } | null
+  roles: CustomRole[]
+  member?: { id: string; name: string; email: string; password: string; role: string; phone: string; status: AccountStatus; createdAt: string } | null
   onClose: () => void
-  onSave: (data: { name: string; email: string; password: string; role: Role; phone: string; status: AccountStatus }) => Promise<boolean>
+  onSave: (data: { name: string; email: string; password: string; role: string; phone: string; status: AccountStatus }) => Promise<boolean>
 }
 
 type FormState = {
   name: string
   email: string
   password: string
-  role: Role
+  role: string
   phone: string
 }
 
@@ -22,17 +24,11 @@ const EMPTY_FORM: FormState = {
   name: '',
   email: '',
   password: '',
-  role: 'cashier',
+  role: '',
   phone: '',
 }
 
-const ROLES: { value: Role; label: string; icon: React.ComponentType<{ className?: string }>; desc: string }[] = [
-  { value: 'store_manager', label: 'Store Manager', icon: Store, desc: 'Dashboard, POS, orders, products & reports' },
-  { value: 'cashier', label: 'Cashier', icon: ShieldCheck, desc: 'POS Terminal and Orders' },
-  { value: 'delivery_driver', label: 'Delivery Driver', icon: Bike, desc: 'Delivery Hub only' },
-]
-
-export default function StaffMemberModal({ open, mode, member, onClose, onSave }: StaffMemberModalProps) {
+export default function StaffMemberModal({ open, mode, member, roles, onClose, onSave }: StaffMemberModalProps) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
@@ -50,12 +46,12 @@ export default function StaffMemberModal({ open, mode, member, onClose, onSave }
         phone: member.phone,
       })
     } else {
-      setForm(EMPTY_FORM)
+      setForm({ ...EMPTY_FORM, role: roles[0] ? roleValueForName(roles[0].name) : '' })
     }
     setErrors({})
     setShowPassword(false)
     setSuccess(false)
-  }, [open, mode, member])
+  }, [open, mode, member, roles])
 
   useEffect(() => {
     if (!open) return
@@ -71,6 +67,11 @@ export default function StaffMemberModal({ open, mode, member, onClose, onSave }
   }, [open, onClose, saving])
 
   if (!open) return null
+
+  const roleOptions = roles.map((r) => ({ value: roleValueForName(r.name), label: r.name }))
+  if (form.role && !roleOptions.some((r) => r.value === form.role)) {
+    roleOptions.push({ value: form.role, label: form.role })
+  }
 
   const update = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setForm((f) => ({ ...f, [field]: value }))
@@ -209,9 +210,8 @@ export default function StaffMemberModal({ open, mode, member, onClose, onSave }
 
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Role</label>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              {ROLES.map((r) => {
-                const Icon = r.icon
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {roleOptions.map((r) => {
                 const active = form.role === r.value
                 return (
                   <button
@@ -223,13 +223,16 @@ export default function StaffMemberModal({ open, mode, member, onClose, onSave }
                     }`}
                   >
                     <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${active ? 'bg-[#9f0f0f] text-white' : 'bg-slate-100 text-slate-400'}`}>
-                      <Icon className="h-4 w-4" />
+                      <ShieldCheck className="h-4 w-4" />
                     </span>
                     <span className={`text-sm font-medium ${active ? 'text-[#9f0f0f]' : 'text-slate-800'}`}>{r.label}</span>
                   </button>
                 )
               })}
             </div>
+            {roleOptions.length === 0 && (
+              <p className="mt-2 text-sm text-slate-500">No roles found. Create a role on the Custom Roles tab first.</p>
+            )}
           </div>
 
           <Field label="Phone Number" htmlFor="sm-phone" hint="Optional">

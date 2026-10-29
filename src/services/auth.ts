@@ -10,7 +10,7 @@ export type StaffUserRow = {
   name: string
   email: string
   password: string
-  role: Role
+  role: string
   phone: string
   is_active: boolean
   created_at: string
@@ -22,7 +22,7 @@ export type RegisteredUser = {
   name: string
   email: string
   password: string
-  role: Role
+  role: string
   phone: string
   status: AccountStatus
   createdAt: string
@@ -32,7 +32,7 @@ export type SessionUser = {
   id: string
   name: string
   email: string
-  role: Role
+  role: string
   phone: string
 }
 
@@ -41,21 +41,21 @@ const USERS_CACHE_KEY = 'store_users_cache'
 
 /* ---------------- Role -> NavKey permissions ---------------- */
 
-export const ROLE_PERMISSIONS: Record<Role, NavKey[]> = {
+export const ROLE_PERMISSIONS: Record<string, NavKey[]> = {
   admin: ['dashboard', 'pos', 'orders', 'products', 'customers', 'coupons', 'delivery', 'reports', 'staff-roles', 'settings'],
   store_manager: ['dashboard', 'pos', 'orders', 'products', 'customers', 'coupons', 'delivery', 'reports', 'settings'],
   cashier: ['pos', 'orders'],
   delivery_driver: ['delivery'],
 }
 
-export const ROLE_LABELS: Record<Role, string> = {
+export const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
   store_manager: 'Store Manager',
   cashier: 'Cashier',
   delivery_driver: 'Delivery Driver',
 }
 
-export function permissionsForRole(role: Role): NavKey[] {
+export function permissionsForRole(role: string): NavKey[] {
   return ROLE_PERMISSIONS[role] ?? []
 }
 
@@ -109,7 +109,7 @@ export async function createStaffUserInCloud(data: {
   name: string
   email: string
   password: string
-  role: Role
+  role: string
   phone: string
   isActive?: boolean
 }): Promise<RegisteredUser | null> {
@@ -132,7 +132,7 @@ export async function updateStaffUserInCloud(id: string, patch: Partial<{
   name: string
   email: string
   password: string
-  role: Role
+  role: string
   phone: string
   is_active: boolean
 }>): Promise<boolean> {

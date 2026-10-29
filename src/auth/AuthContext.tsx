@@ -1,7 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from 'react'
 import type { NavKey } from '@/lib/permissions'
 import { getPermissionsForRole, type StaffMember } from '@/lib/staffUsers'
-import type { Role } from '@/services/auth'
 import { ROLE_LABELS } from '@/services/auth'
 import {
   getSession, startSession, clearSession,
@@ -36,7 +35,7 @@ function buildAuthUser(session: SessionUser, method: 'password' | 'otp' | 'pin')
   }
 }
 
-function getRoleLabel(role: Role): string {
+function getRoleLabel(role: string): string {
   return ROLE_LABELS[role] ?? role
 }
 

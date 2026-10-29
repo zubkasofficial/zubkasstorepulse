@@ -84,14 +84,28 @@ function extractImageSrc(r: ProductRow): string {
   // Prefer the text column (reliable for large data URLs), then fall back to
   // the JSONB images array. Checking images first caused Base64 data URLs to
   // not render in the product list after save.
-  if (r.image_url && r.image_url.trim()) return r.image_url
+  if (r.image_url && r.image_url.trim()) return r.image_url.trim()
   const imgs = r.images
   if (Array.isArray(imgs) && imgs.length > 0) {
     const first = imgs[0]
-    if (typeof first === 'string') return first
-    if (first && typeof first === 'object' && typeof first.src === 'string') return first.src
+    if (first && typeof first === 'object' && typeof first.src === 'string' && first.src.trim()) return first.src.trim()
   }
-  if (typeof imgs === 'string' && imgs.trim()) return imgs
+  if (typeof imgs === 'string' && imgs.trim()) {
+    // The column is jsonb now, but older rows or stringified inserts may have
+    // left a JSON string like '[]' or '[{"src":"..."}]'. Parse it so a valid
+    // image URL is not mistaken for a raw (broken) <img src>.
+    try {
+      const parsed = JSON.parse(imgs)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const first = parsed[0]
+        if (typeof first === 'string' && first.trim()) return first.trim()
+        if (first && typeof first === 'object' && typeof first.src === 'string' && first.src.trim()) return first.src.trim()
+      }
+    } catch {
+      // not JSON — treat as a plain URL only if it looks like one
+      if (/^(https?:|data:)/i.test(imgs.trim())) return imgs.trim()
+    }
+  }
   return ''
 }
 

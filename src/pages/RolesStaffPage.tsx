@@ -74,6 +74,7 @@ function roleIcon(roleName: string): React.ComponentType<{ className?: string }>
 function StaffTab() {
   const { staffId } = useAuth()
   const [staff, setStaff] = useState<StaffMember[]>([])
+  const [roles, setRoles] = useState<CustomRole[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<StaffMember | null>(null)
@@ -81,8 +82,9 @@ function StaffTab() {
 
   const refresh = async () => {
     setLoading(true)
-    const members = await getStaffMembers()
+    const [members, roleList] = await Promise.all([getStaffMembers(), fetchCustomRolesFromCloud()])
     setStaff(members)
+    setRoles(roleList)
     setLoading(false)
   }
 
@@ -131,7 +133,7 @@ function StaffTab() {
           onClick={handleAdd}
           className="flex items-center gap-2 rounded-xl bg-[#9f0f0f] px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-[#9f0f0f]/20 transition hover:bg-[#880d0d] active:scale-[0.98]"
         >
-          <Plus className="h-4 w-4" /> Add Member
+          <Plus className="h-4 w-4" /> Add Staff
         </button>
       </div>
 
@@ -186,7 +188,7 @@ function StaffTab() {
           {staff.length === 0 && !loading && (
             <div className="p-12 text-center">
               <Users className="mx-auto h-10 w-10 text-slate-300" />
-              <p className="mt-3 text-sm text-slate-500">No team members yet. Click "Add Member" to get started.</p>
+              <p className="mt-3 text-sm text-slate-500">No team members yet. Click "Add Staff" to get started.</p>
             </div>
           )}
           {loading && (
@@ -202,6 +204,7 @@ function StaffTab() {
         <StaffMemberModal
           open={modalOpen}
           mode={editTarget ? 'edit' : 'create'}
+          roles={roles}
           member={editTarget}
           onClose={() => { setModalOpen(false); setEditTarget(null) }}
           onSave={handleSave}
@@ -260,13 +263,13 @@ function RolesTab() {
     setModalOpen(true)
   }
 
-  const handleSave = async (name: string, description: string, permissions: NavKey[]) => {
-    if (editTarget) {
-      await updateCustomRoleAsync(editTarget.id, name, description, permissions)
-    } else {
-      await addCustomRoleAsync(name, description, permissions)
-    }
+  const handleSave = async (name: string, description: string, permissions: NavKey[]): Promise<string | null> => {
+    const result = editTarget
+      ? await updateCustomRoleAsync(editTarget.id, name, description, permissions)
+      : await addCustomRoleAsync(name, description, permissions)
+    if (!result.ok) return result.error
     await refresh()
+    return null
   }
 
   const handleDelete = async () => {
@@ -381,12 +384,13 @@ function RoleModal({
   mode: 'create' | 'edit'
   role: CustomRole | null
   onClose: () => void
-  onSave: (name: string, description: string, permissions: NavKey[]) => void
+  onSave: (name: string, description: string, permissions: NavKey[]) => Promise<string | null>
 }) {
   const [name, setName] = useState(role?.name ?? '')
   const [description, setDescription] = useState(role?.description ?? '')
   const [permissions, setPermissions] = useState<NavKey[]>(role?.permissions ?? [])
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   if (!open) return null
 
@@ -396,8 +400,9 @@ function RoleModal({
     )
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (saving) return
     if (!name.trim()) {
       setError('Enter a role name.')
       return
@@ -407,15 +412,21 @@ function RoleModal({
       return
     }
     setError('')
-    onSave(name.trim(), description.trim(), permissions)
+    setSaving(true)
+    const saveError = await onSave(name.trim(), description.trim(), permissions)
+    setSaving(false)
+    if (saveError) {
+      setError(saveError)
+      return
+    }
     onClose()
   }
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm animate-fade-in" onClick={onClose} />
-      <div className="absolute inset-y-0 right-0 w-full max-w-md overflow-y-auto bg-white shadow-2xl animate-slide-in-right sm:max-w-lg">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/95 px-5 py-4 backdrop-blur">
+      <div className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl animate-scale-in">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-5">
           <div>
             <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
               {mode === 'edit' ? 'Edit Role' : 'New Custom Role'}
@@ -433,7 +444,7 @@ function RoleModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5 px-5 py-5" noValidate>
+        <form onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-6" noValidate>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-700">Role Name</label>
             <input
@@ -456,7 +467,7 @@ function RoleModal({
 
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Permissions</label>
-            <div className="space-y-2">
+            <div className="grid gap-3 sm:grid-cols-2">
               {ALL_PERMISSIONS.map((perm: PermissionDef) => {
                 const Icon = PERMISSION_ICONS[perm.key] ?? UserIcon
                 const checked = permissions.includes(perm.key)
@@ -489,9 +500,10 @@ function RoleModal({
 
           <button
             type="submit"
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#9f0f0f] px-5 py-3 text-sm font-semibold text-white shadow-md shadow-[#9f0f0f]/20 transition hover:bg-[#880d0d] active:scale-[0.98]"
+            disabled={saving}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#9f0f0f] px-5 py-3 disabled:cursor-not-allowed disabled:opacity-60 text-sm font-semibold text-white shadow-md shadow-[#9f0f0f]/20 transition hover:bg-[#880d0d] active:scale-[0.98]"
           >
-            <Check className="h-4 w-4" /> {mode === 'edit' ? 'Save Changes' : 'Create Role'}
+            <Check className="h-4 w-4" /> {saving ? 'Saving…' : mode === 'edit' ? 'Save Changes' : 'Create Role'}
           </button>
         </form>
       </div>

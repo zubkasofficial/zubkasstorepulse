@@ -550,59 +550,13 @@ export async function fetchSalesReport(conn: WooConnection): Promise<SalesReport
   }
 }
 
-/* ---------------- WordPress Media Library upload ---------------- */
+/* ---------------- image helpers ---------------- */
 
-export type UploadedMedia = {
-  id: number
-  sourceUrl: string
-}
-
-async function dataUrlToFile(dataUrl: string, productName: string): Promise<File> {
-  const match = dataUrl.match(/^data:(image\/[a-z]+);base64,(.*)$/i)
-  if (!match) throw new Error('Invalid data URL')
-  const mime = match[1]
-  const base64 = match[2]
-  const ext = mime.split('/')[1] || 'png'
-  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
-  const safeName = productName.trim().replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'product'
-  return new File([bytes], `${safeName}.${ext}`, { type: mime })
-}
-
-export async function uploadMediaToWordPress(conn: WooConnection, file: File): Promise<UploadedMedia> {
-  const base = normalizeStoreUrl(conn.storeUrl)
-  const url = `${base}/wp-json/wp/v2/media`
-  const auth = btoa(`${conn.consumerKey}:${conn.consumerSecret}`)
-
-  const headers: Record<string, string> = {
-    Authorization: `Basic ${auth}`,
-    'Content-Disposition': `attachment; filename="${file.name.replace(/"/g, '')}"`,
-  }
-
-  let res: Response
-  try {
-    res = await fetch(url, { method: 'POST', headers, body: file })
-    if (!res.ok && res.status !== 401 && res.status !== 403) {
-      throw new Error(`Upload failed: ${res.status}`)
-    }
-  } catch {
-    const proxyUrl = appendAuthQuery(url, conn)
-    res = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(proxyUrl)}`, { method: 'POST', headers, body: file })
-  }
-
-  if (!res.ok) {
-    let msg = `Upload failed (${res.status})`
-    try {
-      const body = await res.json()
-      msg = body?.message ?? msg
-    } catch {
-      /* non-JSON error */
-    }
-    throw new Error(msg)
-  }
-
-  const data = (await res.json()) as { id: number; source_url: string }
-  return { id: data.id, sourceUrl: data.source_url }
-}
+// WooCommerce's product endpoint accepts a Base64 data URL directly in
+// images[].src and uploads it to the Media Library server-side. This avoids
+// calling the WordPress core /wp/v2/media endpoint, which requires separate
+// application-password/authenticated-user credentials and returns 401 for the
+// WooCommerce REST API keys the app stores.
 
 export async function updateOrderStatus(conn: WooConnection, orderId: string, status: OrderStatus): Promise<void> {
   const numericId = orderId.replace(/[^0-9]/g, '')
@@ -920,7 +874,7 @@ export async function deleteCoupon(conn: WooConnection, couponId: string): Promi
   await wooFetch(conn, `coupons/${couponId}?force=true`, { method: 'DELETE' })
 }
 
-async function buildProductBody(conn: WooConnection, input: CreateProductInput): Promise<Record<string, unknown>> {
+async function buildProductBody(input: CreateProductInput): Promise<Record<string, unknown>> {
   const body: Record<string, unknown> = {
     name: input.name,
     regular_price: String(input.price),
@@ -959,45 +913,11 @@ async function buildProductBody(conn: WooConnection, input: CreateProductInput):
     body.sale_price = ''
     body.on_sale = false
   }
-  // Attach the product image. Remote http(s) URLs are passed directly. Base64
-  // data URLs (local file uploads) are uploaded to the WordPress Media Library
-  // so the returned product has a real, displayable image URL — otherwise the
-  // product list shows the default box icon.
-  const trimmedUrl = input.imageUrl.trim()
-  if (trimmedUrl && /^https?:\/\//i.test(trimmedUrl)) {
-    body.images = [{ src: trimmedUrl }]
-  } else if (trimmedUrl && trimmedUrl.startsWith('data:')) {
-    try {
-      const file = await dataUrlToFile(trimmedUrl, input.name)
-      const media = await uploadMediaToWordPress(conn, file)
-      body.images = [{ src: media.sourceUrl }]
-    } catch {
-      // Upload failed — leave images unset so the product still saves.
-    }
-  }
-  // Gallery images: upload data URLs to the Media Library, pass remote URLs
-  // directly. These are appended after the featured image in WooCommerce's
-  // images array (index 0 is the featured image).
-  const gallerySrcs: string[] = []
-  for (const src of input.galleryImages) {
-    const s = src.trim()
-    if (!s) continue
-    if (/^https?:\/\//i.test(s)) {
-      gallerySrcs.push(s)
-    } else if (s.startsWith('data:')) {
-      try {
-        const file = await dataUrlToFile(s, `${input.name}-gallery`)
-        const media = await uploadMediaToWordPress(conn, file)
-        gallerySrcs.push(media.sourceUrl)
-      } catch {
-        // skip failed upload
-      }
-    }
-  }
-  if (gallerySrcs.length > 0) {
-    const featured = (body.images as Array<{ src: string }> | undefined)?.[0]
-    body.images = featured ? [featured, ...gallerySrcs.map((src) => ({ src }))] : gallerySrcs.map((src) => ({ src }))
-  }
+  // WooCommerce only fetches public http(s) image URLs; data URLs are rejected.
+  const isValidSrc = (s: string): boolean => /^https?:\/\//i.test(s.trim())
+  const featuredSrc = input.imageUrl.trim()
+  const imageSrcs = [featuredSrc, ...input.galleryImages].filter(isValidSrc)
+  body.images = imageSrcs.map((src) => ({ src: src.trim() }))
   if (input.downloadable) {
     body.downloads = input.downloads
       .filter((d) => d.name.trim() && d.file.trim())
@@ -1038,7 +958,7 @@ async function buildProductBody(conn: WooConnection, input: CreateProductInput):
 }
 
 export async function createProduct(conn: WooConnection, input: CreateProductInput): Promise<Product> {
-  const body = await buildProductBody(conn, input)
+  const body = await buildProductBody(input)
   const created = await wooFetch<WooProduct>(conn, 'products', {
     method: 'POST',
     body: JSON.stringify(body),
@@ -1127,7 +1047,7 @@ export async function updateProduct(conn: WooConnection, productId: string, inpu
     reviewsEnabled: input.reviewsEnabled ?? true,
     posAvailable: input.posAvailable ?? true,
   }
-  const body = await buildProductBody(conn, fullInput)
+  const body = await buildProductBody(fullInput)
   const updated = await wooFetch<WooProduct>(conn, `products/${productId}`, {
     method: 'PUT',
     body: JSON.stringify(body),

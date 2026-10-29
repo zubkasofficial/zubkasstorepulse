@@ -7,7 +7,7 @@ import { useAuth } from '../auth/AuthContext'
 import { useInstallPrompt } from '../hooks/useInstallPrompt'
 import {
   fetchStaffUserByEmail,
-  permissionsForRole, type Role,
+  permissionsForRole,
 } from '@/services/auth'
 import { defaultRouteForPermissions } from '@/lib/permissions'
 import { supabase } from '@/lib/supabase'
@@ -98,7 +98,7 @@ export default function LoginPage() {
     return true
   }
 
-  const redirectToRoleHome = (role: Role) => {
+  const redirectToRoleHome = (role: string) => {
     const perms = permissionsForRole(role)
     const route = defaultRouteForPermissions(perms)
     navigate(route, { replace: true })

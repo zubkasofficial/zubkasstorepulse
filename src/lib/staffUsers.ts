@@ -118,37 +118,57 @@ function mapRoleRow(r: CustomRoleRow): CustomRole {
   }
 }
 
+const ROLES_CACHE_KEY = 'store_custom_roles_cache'
+
+function cacheRoles(roles: CustomRole[]): void {
+  try {
+    localStorage.setItem(ROLES_CACHE_KEY, JSON.stringify(roles))
+  } catch { /* ignore */ }
+}
+
+function getCachedRoles(): CustomRole[] {
+  try {
+    const raw = localStorage.getItem(ROLES_CACHE_KEY)
+    return raw ? (JSON.parse(raw) as CustomRole[]) : []
+  } catch {
+    return []
+  }
+}
+
 export async function fetchCustomRolesFromCloud(): Promise<CustomRole[]> {
   const sb = getSupabase()
   if (!sb) return [...BUILTIN_ROLES]
   const { data, error } = await sb.from('custom_roles').select('*').order('created_at', { ascending: true })
+  if (error) console.error('Failed to load custom roles:', error)
   if (error || !data) return [...BUILTIN_ROLES]
-  return (data as CustomRoleRow[]).map(mapRoleRow)
+  const roles = (data as CustomRoleRow[]).map(mapRoleRow)
+  cacheRoles(roles)
+  return roles
 }
 
-export async function addCustomRoleAsync(name: string, description: string, permissions: NavKey[]): Promise<CustomRole | null> {
-  const sb = getSupabase()
-  if (!sb) return null
-  const { data, error } = await sb.from('custom_roles')
-    .insert({
-      name: name.trim(),
-      description: description.trim(),
-      permissions,
-      is_builtin: false,
-    })
-    .select('*')
-    .single()
-  if (error || !data) return null
-  return mapRoleRow(data as CustomRoleRow)
+export type RoleSaveResult = { ok: true } | { ok: false; error: string }
+
+function roleSaveFailure(error: { code?: string; message: string }): RoleSaveResult {
+  console.error('Custom role save failed:', error)
+  if (error.code === '23505') return { ok: false, error: 'A role with this name already exists.' }
+  return { ok: false, error: `The role could not be saved: ${error.message}` }
 }
 
-export async function updateCustomRoleAsync(id: string, name: string, description: string, permissions: NavKey[]): Promise<boolean> {
-  const sb = getSupabase()
-  if (!sb) return false
-  const { error } = await sb.from('custom_roles')
+export async function addCustomRoleAsync(name: string, description: string, permissions: NavKey[]): Promise<RoleSaveResult> {
+  const { error } = await getSupabase().from('custom_roles').insert({
+    name: name.trim(),
+    description: description.trim(),
+    permissions,
+    is_builtin: false,
+  })
+  return error ? roleSaveFailure(error) : { ok: true }
+}
+
+export async function updateCustomRoleAsync(id: string, name: string, description: string, permissions: NavKey[]): Promise<RoleSaveResult> {
+  const { error } = await getSupabase().from('custom_roles')
     .update({ name: name.trim(), description: description.trim(), permissions })
     .eq('id', id)
-  return !error
+  return error ? roleSaveFailure(error) : { ok: true }
 }
 
 export async function deleteCustomRoleAsync(id: string): Promise<boolean> {
@@ -180,6 +200,10 @@ export async function getAllRoleNamesAsync(): Promise<string[]> {
 
 /* ---------------- Synchronous fallbacks (built-in only) ---------------- */
 
+export function roleValueForName(name: string): string {
+  return Object.keys(ROLE_LABELS).find((k) => ROLE_LABELS[k] === name) ?? name
+}
+
 export function getAllRoles(): CustomRole[] {
   return [...BUILTIN_ROLES]
 }
@@ -187,7 +211,7 @@ export function getAllRoles(): CustomRole[] {
 export function getPermissionsForRole(roleName: string): NavKey[] {
   const roleKey = (Object.keys(ROLE_LABELS) as Role[]).find((k) => ROLE_LABELS[k] === roleName)
   if (roleKey) return ROLE_PERMISSIONS[roleKey]
-  return []
+  return getCachedRoles().find((r) => r.name === roleName)?.permissions ?? []
 }
 
 export function getAllRoleNames(): string[] {
