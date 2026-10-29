@@ -225,8 +225,12 @@ export function WooProvider({ children }: { children: ReactNode }) {
       const result = await testConnection(data)
       setConnecting(false)
       if (result.ok) {
+        try {
+          await saveConnectionToCloud(data)
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : 'Could not save your store settings.' }
+        }
         saveConnection(data)
-        await saveConnectionToCloud(data)
         setConnection(data)
         pushToast('success', 'Connected successfully to WooCommerce Store!')
       }

@@ -187,50 +187,31 @@ export function clearConnection(): void {
 import { getSupabase } from '@/lib/supabase'
 
 export async function saveConnectionToCloud(data: WooConnection): Promise<void> {
-  try {
-    const sb = getSupabase()
-    const { data: existing, error: selectError } = await sb
+  const sb = getSupabase()
+  const { data: existing, error: selectError } = await sb
+    .from('store_settings')
+    .select('id')
+    .maybeSingle()
+  if (selectError) throw new Error(`Could not read store settings: ${selectError.message}`)
+
+  const credentials = {
+    woocommerce_url: data.storeUrl,
+    consumer_key: data.consumerKey,
+    consumer_secret: data.consumerSecret,
+    wordpress_username: data.wpUsername,
+    wordpress_application_password: data.wpAppPassword,
+    is_connected: true,
+  }
+
+  if (existing?.id) {
+    const { error: updateError } = await sb
       .from('store_settings')
-      .select('id')
-      .maybeSingle()
-    if (selectError) {
-      console.error('[store_settings] select error:', selectError.message, selectError.code)
-    }
-    if (existing?.id) {
-      const { error: updateError } = await sb
-        .from('store_settings')
-        .update({
-          woocommerce_url: data.storeUrl,
-          consumer_key: data.consumerKey,
-          consumer_secret: data.consumerSecret,
-          wp_username: data.wpUsername,
-          wp_app_password: data.wpAppPassword,
-          is_connected: true,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existing.id)
-      if (updateError) {
-        console.error('[store_settings] update error:', updateError.message, updateError.code)
-      }
-    } else {
-      const { error: insertError } = await sb
-        .from('store_settings')
-        .insert([
-          {
-            woocommerce_url: data.storeUrl,
-            consumer_key: data.consumerKey,
-            consumer_secret: data.consumerSecret,
-            wp_username: data.wpUsername,
-            wp_app_password: data.wpAppPassword,
-            is_connected: true,
-          }
-        ])
-      if (insertError) {
-        console.error('[store_settings] insert error:', insertError.message, insertError.code)
-      }
-    }
-  } catch (err) {
-    console.error('[store_settings] saveConnectionToCloud exception:', err)
+      .update({ ...credentials, updated_at: new Date().toISOString() })
+      .eq('id', existing.id)
+    if (updateError) throw new Error(`Could not save store settings: ${updateError.message}`)
+  } else {
+    const { error: insertError } = await sb.from('store_settings').insert([credentials])
+    if (insertError) throw new Error(`Could not save store settings: ${insertError.message}`)
   }
 }
 
@@ -249,8 +230,8 @@ export async function fetchConnectionFromCloud(): Promise<WooConnection | null> 
       storeUrl: data.woocommerce_url,
       consumerKey: data.consumer_key,
       consumerSecret: data.consumer_secret ?? '',
-      wpUsername: data.wp_username ?? '',
-      wpAppPassword: data.wp_app_password ?? '',
+      wpUsername: data.wordpress_username ?? '',
+      wpAppPassword: data.wordpress_application_password ?? '',
       connectedAt: data.connected_at ?? new Date().toISOString(),
     }
   } catch (err) {
@@ -268,8 +249,8 @@ export async function clearConnectionFromCloud(): Promise<void> {
         woocommerce_url: '',
         consumer_key: '',
         consumer_secret: '',
-        wp_username: '',
-        wp_app_password: '',
+        wordpress_username: '',
+        wordpress_application_password: '',
         is_connected: false,
         updated_at: new Date().toISOString(),
       })
