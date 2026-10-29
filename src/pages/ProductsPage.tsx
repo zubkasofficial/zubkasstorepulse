@@ -30,6 +30,15 @@ export default function ProductsPage() {
   const [category, setCategory] = useState('All')
   const [modalOpen, setModalOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Product | null>(null)
+  const [categoryOptions, setCategoryOptions] = useState<Category[]>([])
+
+  useEffect(() => {
+    let active = true
+    fetchCategories(appMode as 'standalone' | 'woo', connection).then((cats) => {
+      if (active) setCategoryOptions(cats)
+    })
+    return () => { active = false }
+  }, [appMode, connection, modalOpen])
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [editingStock, setEditingStock] = useState<string | null>(null)
@@ -597,6 +606,8 @@ export default function ProductsPage() {
         mode={editTarget ? 'edit' : 'create'}
         product={editTarget}
         appMode={appMode as 'standalone' | 'woo'}
+        connection={connection}
+        categories={categoryOptions}
         onClose={() => { setModalOpen(false); setEditTarget(null) }}
         onSave={handleSave}
       />

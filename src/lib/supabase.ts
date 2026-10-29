@@ -11,6 +11,8 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   },
 })
 
+export const PRODUCT_IMAGE_BUCKET = 'product-images'
+
 const LS_URL_KEY = 'supabase_url'
 const LS_ANON_KEY = 'supabase_anon_key'
 
@@ -72,6 +74,13 @@ export async function initSupabase(url: string, anonKey: string): Promise<InitRe
     const { error } = await testClient.from('store_profile').select('id').limit(1)
     if (error) {
       return { ok: false, error: `Connection test failed: ${error.message}` }
+    }
+    const { error: bucketError } = await testClient.storage.from(PRODUCT_IMAGE_BUCKET).list('', { limit: 1 })
+    if (bucketError) {
+      return {
+        ok: false,
+        error: `This Supabase project has no "${PRODUCT_IMAGE_BUCKET}" storage bucket, so product images cannot be uploaded. Add that bucket to the project, then connect again.`,
+      }
     }
   } catch (err) {
     return { ok: false, error: `Unable to reach Supabase: ${err instanceof Error ? err.message : 'Unknown error'}` }

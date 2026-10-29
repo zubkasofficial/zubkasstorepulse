@@ -6,6 +6,8 @@ export type WooConnection = {
   storeUrl: string
   consumerKey: string
   consumerSecret: string
+  wpUsername: string
+  wpAppPassword: string
   connectedAt: string
 }
 
@@ -156,7 +158,9 @@ const STORAGE_KEY = 'zubkas_woo_connection'
 export function getConnection(): WooConnection | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as WooConnection) : null
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<WooConnection>
+    return { wpUsername: '', wpAppPassword: '', ...parsed } as WooConnection
   } catch {
     return null
   }
@@ -199,6 +203,8 @@ export async function saveConnectionToCloud(data: WooConnection): Promise<void> 
           woocommerce_url: data.storeUrl,
           consumer_key: data.consumerKey,
           consumer_secret: data.consumerSecret,
+          wp_username: data.wpUsername,
+          wp_app_password: data.wpAppPassword,
           is_connected: true,
           updated_at: new Date().toISOString(),
         })
@@ -210,7 +216,14 @@ export async function saveConnectionToCloud(data: WooConnection): Promise<void> 
       const { error: insertError } = await sb
         .from('store_settings')
         .insert([
-          { woocommerce_url: data.storeUrl, consumer_key: data.consumerKey, consumer_secret: data.consumerSecret, is_connected: true }
+          {
+            woocommerce_url: data.storeUrl,
+            consumer_key: data.consumerKey,
+            consumer_secret: data.consumerSecret,
+            wp_username: data.wpUsername,
+            wp_app_password: data.wpAppPassword,
+            is_connected: true,
+          }
         ])
       if (insertError) {
         console.error('[store_settings] insert error:', insertError.message, insertError.code)
@@ -236,6 +249,8 @@ export async function fetchConnectionFromCloud(): Promise<WooConnection | null> 
       storeUrl: data.woocommerce_url,
       consumerKey: data.consumer_key,
       consumerSecret: data.consumer_secret ?? '',
+      wpUsername: data.wp_username ?? '',
+      wpAppPassword: data.wp_app_password ?? '',
       connectedAt: data.connected_at ?? new Date().toISOString(),
     }
   } catch (err) {
@@ -253,6 +268,8 @@ export async function clearConnectionFromCloud(): Promise<void> {
         woocommerce_url: '',
         consumer_key: '',
         consumer_secret: '',
+        wp_username: '',
+        wp_app_password: '',
         is_connected: false,
         updated_at: new Date().toISOString(),
       })

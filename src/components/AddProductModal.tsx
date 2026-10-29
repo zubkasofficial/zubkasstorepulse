@@ -1,15 +1,21 @@
 import { useEffect, useState } from 'react'
-import { X, Loader as Loader2, ImagePlus, CircleAlert as AlertCircle } from 'lucide-react'
-import { PRODUCT_CATEGORIES, formatCurrency, type Product, type Backorders } from '@/data/mockData'
-import { uploadProductImage } from '@/lib/productImages'
-
-type ProductDraft = Omit<Product, 'id' | 'unitsSold'>
+import { X, Loader as Loader2, CircleAlert as AlertCircle } from 'lucide-react'
+import type { Product } from '@/data/mockData'
+import ProductImagesPanel from '@/components/ProductImagesPanel'
+import {
+  AdvancedTab, AttributesTab, GeneralTab, InventoryTab, PRODUCT_TABS, ShippingTab,
+  type ProductDraft, type ProductTab,
+} from '@/components/ProductFormTabs'
+import type { Category } from '@/lib/categories'
+import type { WooConnection } from '@/lib/woocommerce'
 
 type AddProductModalProps = {
   open: boolean
   mode: 'create' | 'edit'
   product: Product | null
   appMode: 'standalone' | 'woo'
+  connection: WooConnection | null
+  categories: Category[]
   onClose: () => void
   onSave: (data: ProductDraft, id?: string) => Promise<void>
 }
@@ -18,7 +24,7 @@ const EMPTY_DRAFT: ProductDraft = {
   name: '',
   sku: '',
   gtin: '',
-  category: PRODUCT_CATEGORIES[0],
+  category: '',
   price: 0,
   salePrice: null,
   stock: 0,
@@ -58,18 +64,26 @@ const EMPTY_DRAFT: ProductDraft = {
   posAvailable: true,
 }
 
-const BACKORDER_OPTIONS: { value: Backorders; label: string }[] = [
-  { value: 'no', label: 'Do not allow' },
-  { value: 'notify', label: 'Allow, notify customer' },
-  { value: 'yes', label: 'Allow' },
-]
+function validateDraft(draft: ProductDraft): Record<string, string> {
+  const next: Record<string, string> = {}
+  if (!draft.name.trim()) next.name = 'Enter a product name.'
+  if (!Number.isFinite(draft.price) || draft.price < 0) next.price = 'Enter a valid price.'
+  if (draft.salePrice !== null && (!Number.isFinite(draft.salePrice) || draft.salePrice < 0)) {
+    next.salePrice = 'Enter a valid sale price.'
+  } else if (draft.salePrice !== null && draft.salePrice >= draft.price) {
+    next.salePrice = 'Sale price must be lower than the regular price.'
+  }
+  if (!Number.isFinite(draft.stock) || draft.stock < 0) next.stock = 'Enter a valid stock quantity.'
+  return next
+}
 
-export default function AddProductModal({ open, mode, product, appMode, onClose, onSave }: AddProductModalProps) {
+export default function AddProductModal({ open, mode, product, appMode, connection, categories, onClose, onSave }: AddProductModalProps) {
   const [draft, setDraft] = useState<ProductDraft>(EMPTY_DRAFT)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [formError, setFormError] = useState('')
+  const [activeTab, setActiveTab] = useState<ProductTab>('general')
 
   useEffect(() => {
     if (!open) return
@@ -77,6 +91,7 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
     setErrors({})
     setFormError('')
     setSaving(false)
+    setActiveTab('general')
   }, [open, mode, product])
 
   useEffect(() => {
@@ -99,57 +114,13 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
     setErrors((e) => ({ ...e, [field]: '' }))
   }
 
-  const validate = () => {
-    const next: Record<string, string> = {}
-    if (!draft.name.trim()) next.name = 'Enter a product name.'
-    if (!Number.isFinite(draft.price) || draft.price < 0) next.price = 'Enter a valid price.'
-    if (draft.salePrice !== null && (!Number.isFinite(draft.salePrice) || draft.salePrice < 0)) {
-      next.salePrice = 'Enter a valid sale price.'
-    } else if (draft.salePrice !== null && draft.salePrice >= draft.price) {
-      next.salePrice = 'Sale price must be lower than the regular price.'
-    }
-    if (!Number.isFinite(draft.stock) || draft.stock < 0) next.stock = 'Enter a valid stock quantity.'
-    setErrors(next)
-    return Object.keys(next).length === 0
-  }
-
-  const handleImage = async (file: File | undefined) => {
-    if (!file) return
-    setUploading(true)
-    setFormError('')
-    try {
-      const { url } = await uploadProductImage(file, 'product')
-      update('imageUrl', url)
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Failed to upload image.')
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  const handleGalleryFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0) return
-    setUploading(true)
-    setFormError('')
-    try {
-      const urls: string[] = []
-      for (const file of Array.from(files)) {
-        const { url } = await uploadProductImage(file, 'product')
-        urls.push(url)
-      }
-      update('galleryImages', [...draft.galleryImages, ...urls])
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Failed to upload gallery image.')
-    } finally {
-      setUploading(false)
-    }
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (saving || uploading || !validate()) return
-    if (appMode === 'woo' && [draft.imageUrl, ...draft.galleryImages].some((src) => src.startsWith('data:'))) {
-      setFormError('Images could not be uploaded to your store yet. Check your connection and try again.')
+    if (saving || uploading) return
+    const found = validateDraft(draft)
+    setErrors(found)
+    if (Object.keys(found).length > 0) {
+      setActiveTab(found.name || found.price || found.salePrice ? 'general' : 'inventory')
       return
     }
     const data: ProductDraft = {
@@ -172,8 +143,7 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
   }
 
   const isEdit = mode === 'edit'
-  const salePriceInput = draft.salePrice === null ? '' : String(draft.salePrice)
-  const showSaleInfo = draft.salePrice !== null && draft.salePrice < draft.price
+  const tabProps = { draft, errors, update }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-0 backdrop-blur-sm sm:items-center sm:p-4 animate-fade-in">
@@ -181,12 +151,12 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-product-title"
-        className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-xl sm:max-w-2xl sm:rounded-2xl"
+        className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-slate-50 shadow-xl sm:max-w-5xl sm:rounded-2xl"
       >
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 py-4 sm:rounded-t-2xl">
           <div>
             <h2 id="add-product-title" className="font-display text-xl font-bold text-slate-900">
-              {isEdit ? 'Edit Product' : 'Add Product'}
+              {isEdit ? 'Edit product' : 'Add product'}
             </h2>
             <p className="text-sm text-slate-500">
               {appMode === 'woo' ? 'Changes are synced to your store.' : 'Saved to your standalone catalog.'}
@@ -203,219 +173,61 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
-          <section className="space-y-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Basic info</h3>
-            <div className="flex items-start gap-4">
-              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100">
-                {draft.imageUrl ? (
-                  <img src={draft.imageUrl} alt="Product" className="h-full w-full object-cover" />
-                ) : (
-                  <ImagePlus className="h-6 w-6 text-slate-300" />
-                )}
-              </div>
-              <div className="flex-1 space-y-2">
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50">
-                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
-                  {uploading ? 'Uploading…' : draft.imageUrl ? 'Replace image' : 'Upload image'}
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    className="sr-only"
-                    disabled={uploading}
-                    onChange={(e) => handleImage(e.target.files?.[0])}
-                  />
-                </label>
-                <p className="text-xs text-slate-400">PNG, JPG, or WEBP up to 8 MB.</p>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-slate-700">Gallery images</p>
-              <div className="flex flex-wrap gap-2">
-                {draft.galleryImages.map((src, i) => (
-                  <div key={`${i}-${src.slice(0, 32)}`} className="relative h-16 w-16 overflow-hidden rounded-lg bg-slate-100">
-                    <img src={src} alt="" className="h-full w-full object-cover" />
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="grid min-h-0 flex-1 gap-6 overflow-y-auto p-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="min-w-0 space-y-4">
+              <div role="tablist" aria-label="Product data" className="flex gap-1 overflow-x-auto border-b border-slate-200">
+                {PRODUCT_TABS.map((tab) => {
+                  const selected = activeTab === tab.key
+                  return (
                     <button
+                      key={tab.key}
                       type="button"
-                      onClick={() => update('galleryImages', draft.galleryImages.filter((_, j) => j !== i))}
-                      aria-label="Remove gallery image"
-                      className="absolute right-0.5 top-0.5 rounded-full bg-white/90 p-0.5 text-slate-600 shadow transition hover:text-red-600"
+                      role="tab"
+                      aria-selected={selected}
+                      onClick={() => setActiveTab(tab.key)}
+                      className={`-mb-px whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition ${
+                        selected
+                          ? 'border-brand text-brand'
+                          : 'border-transparent text-slate-500 hover:text-slate-700'
+                      }`}
                     >
-                      <X className="h-3 w-3" />
+                      {tab.label}
                     </button>
-                  </div>
-                ))}
-                <label className="flex h-16 w-16 cursor-pointer items-center justify-center rounded-lg border border-dashed border-slate-300 text-slate-400 transition hover:border-slate-400 hover:text-slate-600">
-                  <ImagePlus className="h-5 w-5" />
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    multiple
-                    className="sr-only"
-                    disabled={uploading}
-                    onChange={(e) => handleGalleryFiles(e.target.files)}
-                  />
-                </label>
+                  )
+                })}
               </div>
+
+              <section role="tabpanel" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                {activeTab === 'general' && <GeneralTab {...tabProps} categories={categories} />}
+                {activeTab === 'inventory' && <InventoryTab {...tabProps} />}
+                {activeTab === 'shipping' && <ShippingTab {...tabProps} />}
+                {activeTab === 'attributes' && <AttributesTab {...tabProps} />}
+                {activeTab === 'advanced' && <AdvancedTab {...tabProps} />}
+              </section>
             </div>
 
-            <Field label="Product name" error={errors.name}>
-              <input
-                value={draft.name}
-                onChange={(e) => update('name', e.target.value)}
-                className="input-field"
-                placeholder="e.g. Wireless Earbuds"
-              />
-            </Field>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="SKU">
-                <input value={draft.sku} onChange={(e) => update('sku', e.target.value)} className="input-field font-mono" />
-              </Field>
-              <Field label="Barcode (GTIN)">
-                <input value={draft.gtin} onChange={(e) => update('gtin', e.target.value)} className="input-field font-mono" />
-              </Field>
-            </div>
-
-            <Field label="Category">
-              <select value={draft.category} onChange={(e) => update('category', e.target.value)} className="input-field">
-                {PRODUCT_CATEGORIES.includes(draft.category) || !draft.category ? null : (
-                  <option value={draft.category}>{draft.category}</option>
-                )}
-                {PRODUCT_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </Field>
-
-            <Field label="Description">
-              <textarea
-                value={draft.description}
-                onChange={(e) => update('description', e.target.value)}
-                rows={3}
-                className="input-field"
-              />
-            </Field>
-          </section>
-
-          <section className="space-y-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Pricing</h3>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Regular price" error={errors.price}>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={String(draft.price)}
-                  onChange={(e) => update('price', Number(e.target.value))}
-                  className="input-field"
-                />
-              </Field>
-              <Field label="Sale price (optional)" error={errors.salePrice}>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={salePriceInput}
-                  onChange={(e) => update('salePrice', e.target.value === '' ? null : Number(e.target.value))}
-                  className="input-field"
-                />
-              </Field>
-            </div>
-            {showSaleInfo && (
-              <p className="flex items-center gap-1.5 text-xs text-green-600">
-                Customers pay {formatCurrency(draft.salePrice ?? draft.price)} instead of {formatCurrency(draft.price)}.
-              </p>
-            )}
-            <Field label="Tax status">
-              <select
-                value={draft.taxStatus}
-                onChange={(e) => update('taxStatus', e.target.value as ProductDraft['taxStatus'])}
-                className="input-field"
-              >
-                <option value="taxable">Taxable</option>
-                <option value="none">None</option>
-              </select>
-            </Field>
-          </section>
-
-          <section className="space-y-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Inventory</h3>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={draft.manageStock}
-                onChange={(e) => update('manageStock', e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-brand focus:ring-brand/30"
-              />
-              Track stock quantity
-            </label>
-            {draft.manageStock ? (
-              <Field label="Stock quantity" error={errors.stock}>
-                <input
-                  type="number"
-                  min="0"
-                  value={String(draft.stock)}
-                  onChange={(e) => update('stock', Number(e.target.value))}
-                  className="input-field"
-                />
-              </Field>
-            ) : (
-              <Field label="Availability">
-                <select
-                  value={draft.stockStatus}
-                  onChange={(e) => update('stockStatus', e.target.value as ProductDraft['stockStatus'])}
-                  className="input-field"
-                >
-                  <option value="instock">In stock</option>
-                  <option value="outofstock">Out of stock</option>
-                </select>
-              </Field>
-            )}
-            <Field label="When out of stock">
-              <select
-                value={draft.backorders}
-                onChange={(e) => update('backorders', e.target.value as Backorders)}
-                className="input-field"
-              >
-                {BACKORDER_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-            </Field>
-          </section>
-
-          <section className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Visibility</h3>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={draft.posAvailable}
-                onChange={(e) => update('posAvailable', e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-brand focus:ring-brand/30"
-              />
-              Available in POS
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={draft.virtual}
-                onChange={(e) => update('virtual', e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-brand focus:ring-brand/30"
-              />
-              Virtual product (no shipping)
-            </label>
-          </section>
+            <ProductImagesPanel
+              imageUrl={draft.imageUrl}
+              galleryImages={draft.galleryImages}
+              disabled={saving}
+              appMode={appMode}
+              connection={connection}
+              onImageChange={(url) => update('imageUrl', url)}
+              onGalleryChange={(urls) => update('galleryImages', urls)}
+              onBusyChange={setUploading}
+              onError={setFormError}
+            />
+          </div>
 
           {formError && (
-            <div className="flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">
+            <div className="mx-6 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>{formError}</span>
             </div>
           )}
 
-          <div className="sticky bottom-0 -mx-6 flex justify-end gap-2 border-t border-slate-100 bg-white px-6 py-4">
+          <div className="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-white px-6 py-4 sm:rounded-b-2xl">
             <button
               type="button"
               onClick={onClose}
@@ -427,21 +239,11 @@ export default function AddProductModal({ open, mode, product, appMode, onClose,
             <button type="submit" disabled={saving || uploading} className="btn-primary disabled:cursor-not-allowed disabled:opacity-60">
               {saving ? (
                 <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
-              ) : isEdit ? 'Save changes' : 'Add product'}
+              ) : isEdit ? 'Update product' : 'Publish product'}
             </button>
           </div>
         </form>
       </div>
-    </div>
-  )
-}
-
-function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="mb-1.5 block text-sm font-medium text-slate-700">{label}</label>
-      {children}
-      {error && <p className="mt-1.5 text-xs text-red-600">{error}</p>}
     </div>
   )
 }

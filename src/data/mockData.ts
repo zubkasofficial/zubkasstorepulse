@@ -113,7 +113,6 @@ export type Product = {
   posAvailable: boolean
 }
 
-export const PRODUCT_CATEGORIES = ['Electronics', 'Wearables', 'Home & Living', 'Accessories']
 
 export type Customer = {
   id: string

@@ -103,7 +103,7 @@ type CustomRoleRow = {
   name: string
   description: string
   permissions: string[]
-  is_builtin: boolean
+  is_system: boolean
   created_at: string
 }
 
@@ -113,7 +113,7 @@ function mapRoleRow(r: CustomRoleRow): CustomRole {
     name: r.name,
     description: r.description ?? '',
     permissions: Array.isArray(r.permissions) ? (r.permissions as NavKey[]) : [],
-    isBuiltin: r.is_builtin,
+    isBuiltin: r.is_system,
     createdAt: r.created_at,
   }
 }
@@ -159,7 +159,7 @@ export async function addCustomRoleAsync(name: string, description: string, perm
     name: name.trim(),
     description: description.trim(),
     permissions,
-    is_builtin: false,
+    is_system: false,
   })
   return error ? roleSaveFailure(error) : { ok: true }
 }

@@ -591,6 +591,8 @@ function WooCommerceTab() {
   const [storeUrl, setStoreUrl] = useState(connection?.storeUrl ?? '')
   const [consumerKey, setConsumerKey] = useState(connection?.consumerKey ?? '')
   const [consumerSecret, setConsumerSecret] = useState(connection?.consumerSecret ?? '')
+  const [wpUsername, setWpUsername] = useState(connection?.wpUsername ?? '')
+  const [wpAppPassword, setWpAppPassword] = useState(connection?.wpAppPassword ?? '')
   const [errors, setErrors] = useState<{ storeUrl?: string; key?: string; secret?: string }>({})
   const [testing, setTesting] = useState(false)
   const [testError, setTestError] = useState('')
@@ -625,6 +627,8 @@ function WooCommerceTab() {
       storeUrl: normalizeStoreUrl(storeUrl),
       consumerKey: consumerKey.trim(),
       consumerSecret: consumerSecret.trim(),
+      wpUsername: wpUsername.trim(),
+      wpAppPassword: wpAppPassword.trim(),
       connectedAt: new Date().toISOString(),
     })
     setTesting(false)
@@ -638,6 +642,8 @@ function WooCommerceTab() {
     setStoreUrl('')
     setConsumerKey('')
     setConsumerSecret('')
+    setWpUsername('')
+    setWpAppPassword('')
     setErrors({})
     setTestError('')
   }
@@ -748,6 +754,30 @@ function WooCommerceTab() {
                 placeholder="cs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
               />
             </Field>
+
+            <Field label="WordPress Username" htmlFor="wp-username" hint="Needed to upload product photos to your WordPress media library.">
+              <input
+                id="wp-username"
+                type="text"
+                value={wpUsername}
+                onChange={(e) => setWpUsername(e.target.value)}
+                className="input-field"
+                placeholder="your-wp-username"
+                autoComplete="off"
+              />
+            </Field>
+
+            <Field label="WordPress Application Password" htmlFor="wp-app-password">
+              <input
+                id="wp-app-password"
+                type="text"
+                value={wpAppPassword}
+                onChange={(e) => setWpAppPassword(e.target.value)}
+                className="input-field font-mono text-sm"
+                placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"
+                autoComplete="off"
+              />
+            </Field>
           </div>
 
           {testError && (
@@ -783,6 +813,7 @@ function WooCommerceTab() {
               'Go to WooCommerce → Settings → Advanced → REST API.',
               'Click "Add Key" and set permissions to Read/Write.',
               'Copy & paste the Consumer Key and Consumer Secret into the fields on the left.',
+              'For photo uploads, go to Users → Profile in WordPress, create an Application Password, and enter it with your username on the left.',
             ].map((step, i) => (
               <li key={i} className="flex gap-3">
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-bold text-white">
