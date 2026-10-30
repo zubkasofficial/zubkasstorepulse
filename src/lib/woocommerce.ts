@@ -60,6 +60,8 @@ export type WooVariation = {
   manage_stock: boolean
   stock_quantity: number | null
   attributes: Array<{ id: number; name: string; option: string }>
+  weight: string
+  image: { src: string } | null
 }
 
 export type WooProduct = {
@@ -471,6 +473,8 @@ function mapVariation(v: WooVariation): ProductVariation {
     salePrice: v.sale_price ? v.sale_price : null,
     stockStatus: v.stock_status === 'outofstock' ? 'outofstock' : 'instock',
     attributes: (v.attributes ?? []).map((a) => ({ name: a.name, option: a.option })),
+    imageUrl: v.image?.src ?? '',
+    weight: v.weight ?? '',
   }
 }
 
@@ -876,7 +880,6 @@ async function buildProductBody(input: CreateProductInput): Promise<Record<strin
   const body: Record<string, unknown> = {
     name: input.name,
     regular_price: String(input.price),
-    sku: input.sku,
     manage_stock: input.manageStock,
     short_description: input.description,
     description: input.fullDescription,
@@ -888,6 +891,7 @@ async function buildProductBody(input: CreateProductInput): Promise<Record<strin
     tax_class: input.taxClass,
     status: 'publish',
   }
+  if (input.sku.trim()) body.sku = input.sku.trim()
   if (input.manageStock) {
     body.stock_quantity = input.stock
     body.in_stock = input.stockStatus === 'instock'
@@ -957,41 +961,28 @@ async function buildProductBody(input: CreateProductInput): Promise<Record<strin
 
 export async function createProduct(conn: WooConnection, input: CreateProductInput): Promise<Product> {
   const body = await buildProductBody(input)
-  const created = await wooFetch<WooProduct>(conn, 'products', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  })
+  const created = await sendWithSkuFallback(body, (b) =>
+    wooFetch<WooProduct>(conn, 'products', { method: 'POST', body: JSON.stringify(b) }),
+  )
   const mapped = mapProduct(created)
   // If variable product with variations, create them
   if (input.type === 'variable' && input.variations.length > 0) {
     const variations: ProductVariation[] = []
     for (const v of input.variations) {
-      try {
-        const vBody: Record<string, unknown> = {
-          sku: v.sku,
-          regular_price: v.price,
-          attributes: v.attributes,
-          stock_status: v.stockStatus ?? 'instock',
-          manage_stock: false,
-        }
-        if (v.salePrice) {
-          vBody.sale_price = v.salePrice
-        }
-        const createdV = await wooFetch<WooProduct>(conn, `products/${created.id}/variations`, {
-          method: 'POST',
-          body: JSON.stringify(vBody),
-        })
-        variations.push({
-          id: String(createdV.id),
-          sku: v.sku,
-          price: v.price,
-          salePrice: v.salePrice,
-          stockStatus: v.stockStatus ?? 'instock',
-          attributes: v.attributes,
-        })
-      } catch {
-        // skip failed variation
+      const vBody: Record<string, unknown> = {
+        regular_price: v.price,
+        attributes: v.attributes,
+        stock_status: v.stockStatus ?? 'instock',
+        manage_stock: false,
+        weight: v.weight,
       }
+      if (v.sku.trim()) vBody.sku = v.sku.trim()
+      if (v.salePrice) vBody.sale_price = v.salePrice
+      if (/^https?:\/\//i.test(v.imageUrl)) vBody.image = { src: v.imageUrl }
+      const createdV = await sendWithSkuFallback(vBody, (b) =>
+        wooFetch<WooVariation>(conn, `products/${created.id}/variations`, { method: 'POST', body: JSON.stringify(b) }),
+      )
+      variations.push(mapVariation(createdV))
     }
     mapped.variations = variations
   }
@@ -1045,12 +1036,59 @@ export async function updateProduct(conn: WooConnection, productId: string, inpu
     reviewsEnabled: input.reviewsEnabled ?? true,
     posAvailable: input.posAvailable ?? true,
   }
-  const body = await buildProductBody(fullInput)
-  const updated = await wooFetch<WooProduct>(conn, `products/${productId}`, {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  })
-  return mapProduct(updated)
+  return saveProduct(conn, productId, fullInput)
+}
+
+function isSkuError(err: unknown): boolean {
+  return err instanceof Error && /duplicated sku|invalid sku/i.test(err.message)
+}
+
+// WooCommerce rejects a SKU that is already used by another product or variation.
+// Retry the same request without the SKU so the rest of the save still goes through.
+async function sendWithSkuFallback<T>(body: Record<string, unknown>, send: (body: Record<string, unknown>) => Promise<T>): Promise<T> {
+  try {
+    return await send(body)
+  } catch (err) {
+    if (!isSkuError(err) || !('sku' in body)) throw err
+    const retry = { ...body }
+    delete retry.sku
+    return send(retry)
+  }
+}
+
+async function saveProduct(conn: WooConnection, productId: string, input: CreateProductInput): Promise<Product> {
+  const body = await buildProductBody(input)
+  const updated = await sendWithSkuFallback(body, (b) =>
+    wooFetch<WooProduct>(conn, `products/${productId}`, { method: 'PUT', body: JSON.stringify(b) }),
+  )
+  const mapped = mapProduct(updated)
+  if (input.type === 'variable') {
+    mapped.variations = await syncVariations(conn, productId, input.variations)
+  }
+  return mapped
+}
+
+async function syncVariations(conn: WooConnection, productId: string, variations: ProductVariation[]): Promise<ProductVariation[]> {
+  const synced: ProductVariation[] = []
+  for (const v of variations) {
+    const vBody: Record<string, unknown> = {
+      regular_price: v.price,
+      sale_price: v.salePrice ?? '',
+      attributes: v.attributes,
+      stock_status: v.stockStatus,
+      weight: v.weight,
+      image: /^https?:\/\//i.test(v.imageUrl) ? { src: v.imageUrl } : null,
+    }
+    if (v.sku.trim()) vBody.sku = v.sku.trim()
+    const isNew = v.id.startsWith('new-')
+    const path = isNew ? `products/${productId}/variations` : `products/${productId}/variations/${v.id}`
+    const method = isNew ? 'POST' : 'PUT'
+    const saved = await sendWithSkuFallback(vBody, (b) =>
+      wooFetch<WooVariation>(conn, path, { method, body: JSON.stringify(b) }),
+    )
+    synced.push(mapVariation(saved))
+  }
+  return synced
 }
 
 export async function deleteProduct(conn: WooConnection, productId: string): Promise<void> {

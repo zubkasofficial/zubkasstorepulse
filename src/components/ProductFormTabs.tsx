@@ -1,18 +1,25 @@
+import { useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { formatCurrency, type Backorders, type Product, type ProductAttribute } from '@/data/mockData'
 import type { Category } from '@/lib/categories'
+import DownloadableFilesEditor from '@/components/DownloadableFilesEditor'
 
 export type ProductDraft = Omit<Product, 'id' | 'unitsSold'>
 
-export type ProductTab = 'general' | 'inventory' | 'shipping' | 'attributes' | 'advanced'
+export type ProductTab = 'general' | 'inventory' | 'shipping' | 'attributes' | 'variations' | 'advanced'
 
 export const PRODUCT_TABS: { key: ProductTab; label: string }[] = [
   { key: 'general', label: 'General' },
   { key: 'inventory', label: 'Inventory' },
   { key: 'shipping', label: 'Shipping' },
   { key: 'attributes', label: 'Attributes' },
+  { key: 'variations', label: 'Variations' },
   { key: 'advanced', label: 'Advanced' },
 ]
+
+export function tabsForType(type: ProductDraft['type']): { key: ProductTab; label: string }[] {
+  return PRODUCT_TABS.filter((tab) => tab.key !== 'variations' || type === 'variable')
+}
 
 type TabProps = {
   draft: ProductDraft
@@ -64,6 +71,8 @@ export function GeneralTab({ draft, errors, update, categories }: TabProps & { c
           <p className="mt-1.5 text-xs text-slate-400">Create categories in the Categories tab to choose one here.</p>
         )}
       </Field>
+      {draft.type === 'simple' && (
+        <>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Regular price" error={errors.price}>
           <input
@@ -91,6 +100,13 @@ export function GeneralTab({ draft, errors, update, categories }: TabProps & { c
           Customers pay {formatCurrency(draft.salePrice ?? draft.price)} instead of {formatCurrency(draft.price)}.
         </p>
       )}
+        </>
+      )}
+      {draft.type === 'variable' && (
+        <p className="rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-500">
+          Prices for a variable product are set per variation in the Variations tab.
+        </p>
+      )}
       <Field label="Tax status">
         <select
           value={draft.taxStatus}
@@ -111,6 +127,9 @@ export function GeneralTab({ draft, errors, update, categories }: TabProps & { c
           Downloadable
         </label>
       </div>
+      {draft.downloadable && (
+        <DownloadableFilesEditor downloads={draft.downloads} onChange={(downloads) => update('downloads', downloads)} />
+      )}
     </div>
   )
 }
@@ -126,10 +145,13 @@ export function InventoryTab({ draft, errors, update }: TabProps) {
           <input value={draft.gtin} onChange={(e) => update('gtin', e.target.value)} className="input-field font-mono" />
         </Field>
       </div>
-      <label className="flex items-center gap-2 text-sm text-slate-700">
-        <input type="checkbox" checked={draft.manageStock} onChange={(e) => update('manageStock', e.target.checked)} className={CHECKBOX_CLASS} />
-        Manage stock quantity
-      </label>
+      {draft.type === 'simple' && (
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={draft.manageStock} onChange={(e) => update('manageStock', e.target.checked)} className={CHECKBOX_CLASS} />
+          Manage stock quantity
+        </label>
+      )}
+      {draft.type === 'simple' && (
       <div className="grid gap-4 sm:grid-cols-2">
         {draft.manageStock ? (
           <Field label="Stock quantity" error={errors.stock}>
@@ -167,6 +189,7 @@ export function InventoryTab({ draft, errors, update }: TabProps) {
           </Field>
         )}
       </div>
+      )}
       <label className="flex items-center gap-2 text-sm text-slate-700">
         <input type="checkbox" checked={draft.soldIndividually} onChange={(e) => update('soldIndividually', e.target.checked)} className={CHECKBOX_CLASS} />
         Sold individually (one per order)
@@ -245,6 +268,12 @@ export function AttributesTab({ draft, update }: TabProps) {
               <input type="checkbox" checked={attr.visible} onChange={(e) => patchAttribute(i, { visible: e.target.checked })} className={CHECKBOX_CLASS} />
               Show on product page
             </label>
+            {draft.type === 'variable' && (
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={attr.variation} onChange={(e) => patchAttribute(i, { variation: e.target.checked })} className={CHECKBOX_CLASS} />
+                Used for variations
+              </label>
+            )}
             <button
               type="button"
               onClick={() => setAttributes(draft.attributes.filter((_, j) => j !== i))}
@@ -262,6 +291,153 @@ export function AttributesTab({ draft, update }: TabProps) {
       >
         <Plus className="h-4 w-4" /> Add attribute
       </button>
+    </div>
+  )
+}
+
+function cartesian(lists: string[][]): string[][] {
+  return lists.reduce<string[][]>((acc, list) => acc.flatMap((combo) => list.map((v) => [...combo, v])), [[]])
+}
+
+export function VariationsTab({ draft, update, onUploadImage }: TabProps & { onUploadImage: (file: File) => Promise<string> }) {
+  const [uploadingIndex, setUploadingIndex] = useState<number | null>(null)
+  const [imageError, setImageError] = useState('')
+  const variationAttrs = draft.attributes.filter((a) => a.variation && a.name.trim() && a.options.length > 0)
+
+  const generate = () => {
+    const combos = cartesian(variationAttrs.map((a) => a.options))
+    const existing = new Map(draft.variations.map((v) => [v.attributes.map((x) => `${x.name}:${x.option}`).join('|'), v]))
+    const next = combos.map((combo, i) => {
+      const attributes = variationAttrs.map((a, j) => ({ name: a.name, option: combo[j] }))
+      const key = attributes.map((x) => `${x.name}:${x.option}`).join('|')
+      const prev = existing.get(key)
+      return prev ?? {
+        id: `new-${Date.now()}-${i}`,
+        sku: '',
+        price: draft.price ? String(draft.price) : '',
+        salePrice: null,
+        stockStatus: 'instock' as const,
+        attributes,
+        imageUrl: '',
+        weight: '',
+      }
+    })
+    update('variations', next)
+  }
+
+  const patchVariation = (index: number, change: Partial<ProductDraft['variations'][number]>) =>
+    update('variations', draft.variations.map((v, i) => (i === index ? { ...v, ...change } : v)))
+
+  const handleImage = async (index: number, file: File | undefined) => {
+    if (!file) return
+    setImageError('')
+    setUploadingIndex(index)
+    try {
+      const url = await onUploadImage(file)
+      patchVariation(index, { imageUrl: url })
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : 'Image upload failed.')
+    } finally {
+      setUploadingIndex(null)
+    }
+  }
+
+  if (variationAttrs.length === 0) {
+    return (
+      <p className="text-sm text-slate-500">
+        Add an attribute with values and tick "Used for variations" in the Attributes tab, then generate variations here.
+      </p>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-slate-500">
+          {draft.variations.length} variation{draft.variations.length === 1 ? '' : 's'}
+        </p>
+        <button
+          type="button"
+          onClick={generate}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
+        >
+          Generate variations
+        </button>
+      </div>
+      {draft.variations.length === 0 && (
+        <p className="text-sm text-slate-400">No variations yet. Click "Generate variations" to create one for each combination.</p>
+      )}
+      <fieldset disabled={uploadingIndex !== null} className="space-y-4">
+      {draft.variations.map((v, i) => (
+        <div key={v.id} className="space-y-3 rounded-xl border border-slate-200 p-4">
+          <p className="text-sm font-semibold text-slate-800">
+            {v.attributes.map((a) => `${a.name}: ${a.option}`).join(' / ')}
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Regular price">
+              <input type="number" min="0" step="0.01" value={v.price} onChange={(e) => patchVariation(i, { price: e.target.value })} className="input-field" />
+            </Field>
+            <Field label="Sale price (optional)">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={v.salePrice ?? ''}
+                onChange={(e) => patchVariation(i, { salePrice: e.target.value === '' ? null : e.target.value })}
+                className="input-field"
+              />
+            </Field>
+            <Field label="SKU">
+              <input value={v.sku} onChange={(e) => patchVariation(i, { sku: e.target.value })} className="input-field font-mono" />
+            </Field>
+            <Field label="Stock status">
+              <select
+                value={v.stockStatus}
+                onChange={(e) => patchVariation(i, { stockStatus: e.target.value as 'instock' | 'outofstock' })}
+                className="input-field"
+              >
+                <option value="instock">In stock</option>
+                <option value="outofstock">Out of stock</option>
+              </select>
+            </Field>
+            <Field label="Weight (kg)">
+              <input inputMode="decimal" value={v.weight} onChange={(e) => patchVariation(i, { weight: e.target.value })} className="input-field" />
+            </Field>
+            <Field label="Image">
+              <div className="flex flex-wrap items-center gap-3">
+                {v.imageUrl ? (
+                  <img src={v.imageUrl} alt="" className="h-14 w-14 rounded-lg border border-slate-200 object-cover" />
+                ) : (
+                  <div className="flex h-14 w-14 items-center justify-center rounded-lg border border-dashed border-slate-300 text-xs text-slate-400">None</div>
+                )}
+                <label className="cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50">
+                  {uploadingIndex === i ? 'Uploading...' : v.imageUrl ? 'Replace image' : 'Upload image'}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="sr-only"
+                    onChange={(e) => {
+                      void handleImage(i, e.target.files?.[0])
+                      e.target.value = ''
+                    }}
+                  />
+                </label>
+                {v.imageUrl && (
+                  <button
+                    type="button"
+                    onClick={() => patchVariation(i, { imageUrl: '' })}
+                    className="rounded-lg px-2 py-1 text-sm text-slate-500 transition hover:bg-red-50 hover:text-red-600"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </Field>
+          </div>
+        </div>
+      ))}
+      </fieldset>
+      {imageError && <p className="text-sm text-red-600">{imageError}</p>}
     </div>
   )
 }

@@ -65,6 +65,8 @@ export type ProductVariation = {
   salePrice: string | null
   stockStatus: 'instock' | 'outofstock'
   attributes: Array<{ name: string; option: string }>
+  imageUrl: string
+  weight: string
 }
 
 export type Product = {

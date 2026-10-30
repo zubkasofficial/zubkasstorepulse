@@ -20,7 +20,7 @@ export type ProductRow = {
   gallery_images: unknown
   description: string | null
   attributes: Array<{ id: number; name: string; position: number; visible: boolean; variation: boolean; options: string[] }> | null
-  variations: Array<{ id: string; sku: string; price: string; salePrice: string | null; stockStatus: 'instock' | 'outofstock'; attributes: Array<{ name: string; option: string }> }> | null
+  variations: Array<{ id: string; sku: string; price: string; salePrice: string | null; stockStatus: 'instock' | 'outofstock'; attributes: Array<{ name: string; option: string }>; imageUrl: string; weight: string }> | null
   type: string | null
   virtual: boolean | null
   downloadable: boolean | null
@@ -188,6 +188,8 @@ function mapProductRow(r: ProductRow): Product {
           salePrice: v.salePrice,
           stockStatus: (v.stockStatus === 'instock' || v.stockStatus === 'outofstock') ? v.stockStatus : 'instock' as const,
           attributes: v.attributes,
+          imageUrl: v.imageUrl ?? '',
+          weight: v.weight ?? '',
         }))
       : [],
     tags: r.tags ? r.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
@@ -278,7 +280,7 @@ export type StandaloneProductInput = {
   downloadLimit?: number
   downloadExpiry?: number
   attributes?: Array<{ id: number; name: string; position: number; visible: boolean; variation: boolean; options: string[] }>
-  variations?: Array<{ id: string; sku: string; price: string; salePrice: string | null; stockStatus: 'instock' | 'outofstock'; attributes: Array<{ name: string; option: string }> }>
+  variations?: Array<{ id: string; sku: string; price: string; salePrice: string | null; stockStatus: 'instock' | 'outofstock'; attributes: Array<{ name: string; option: string }>; imageUrl: string; weight: string }>
   tags?: string[]
   weight?: string
   length?: string

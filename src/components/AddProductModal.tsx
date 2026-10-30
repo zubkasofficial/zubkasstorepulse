@@ -3,11 +3,12 @@ import { X, Loader as Loader2, CircleAlert as AlertCircle } from 'lucide-react'
 import type { Product } from '@/data/mockData'
 import ProductImagesPanel from '@/components/ProductImagesPanel'
 import {
-  AdvancedTab, AttributesTab, GeneralTab, InventoryTab, PRODUCT_TABS, ShippingTab,
+  AdvancedTab, AttributesTab, Field, GeneralTab, InventoryTab, ShippingTab, VariationsTab, tabsForType,
   type ProductDraft, type ProductTab,
 } from '@/components/ProductFormTabs'
 import type { Category } from '@/lib/categories'
 import type { WooConnection } from '@/lib/woocommerce'
+import { uploadProductImage, type ImageUploadTarget } from '@/lib/productImages'
 
 type AddProductModalProps = {
   open: boolean
@@ -114,6 +115,17 @@ export default function AddProductModal({ open, mode, product, appMode, connecti
     setErrors((e) => ({ ...e, [field]: '' }))
   }
 
+  const uploadVariationImage = async (file: File): Promise<string> => {
+    const target: ImageUploadTarget = appMode === 'standalone' ? { mode: 'standalone' } : { mode: 'woo', connection }
+    setUploading(true)
+    try {
+      const { url } = await uploadProductImage(file, target)
+      return url
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (saving || uploading) return
@@ -176,8 +188,22 @@ export default function AddProductModal({ open, mode, product, appMode, connecti
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="grid min-h-0 flex-1 gap-6 overflow-y-auto p-6 lg:grid-cols-[minmax(0,1fr)_300px]">
             <div className="min-w-0 space-y-4">
+              <Field label="Product type">
+                <select
+                  value={draft.type}
+                  onChange={(e) => {
+                    const type = e.target.value as ProductDraft['type']
+                    update('type', type)
+                    if (type === 'simple' && activeTab === 'variations') setActiveTab('general')
+                  }}
+                  className="input-field"
+                >
+                  <option value="simple">Simple product</option>
+                  <option value="variable">Variable product</option>
+                </select>
+              </Field>
               <div role="tablist" aria-label="Product data" className="flex gap-1 overflow-x-auto border-b border-slate-200">
-                {PRODUCT_TABS.map((tab) => {
+                {tabsForType(draft.type).map((tab) => {
                   const selected = activeTab === tab.key
                   return (
                     <button
@@ -203,6 +229,9 @@ export default function AddProductModal({ open, mode, product, appMode, connecti
                 {activeTab === 'inventory' && <InventoryTab {...tabProps} />}
                 {activeTab === 'shipping' && <ShippingTab {...tabProps} />}
                 {activeTab === 'attributes' && <AttributesTab {...tabProps} />}
+                {activeTab === 'variations' && draft.type === 'variable' && (
+                  <VariationsTab {...tabProps} onUploadImage={uploadVariationImage} />
+                )}
                 {activeTab === 'advanced' && <AdvancedTab {...tabProps} />}
               </section>
             </div>
