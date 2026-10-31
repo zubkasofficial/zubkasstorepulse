@@ -95,6 +95,77 @@ export async function uploadProductImage(
   return uploadToSupabase(blob, source)
 }
 
+function fileExtFromName(name: string): string {
+  const match = name.match(/\.([a-zA-Z0-9]+)$/)
+  return match ? match[1].toLowerCase() : 'bin'
+}
+
+async function uploadFileToSupabase(file: File): Promise<string> {
+  const supabase = getSupabase()
+  const ext = fileExtFromName(file.name)
+  const path = `downloads/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`
+
+  const { error } = await supabase.storage.from(PRODUCT_IMAGE_BUCKET).upload(path, file, {
+    contentType: file.type || 'application/octet-stream',
+    upsert: false,
+  })
+
+  if (error) throw new Error(`Could not upload file to storage: ${error.message}`)
+
+  const { data } = supabase.storage.from(PRODUCT_IMAGE_BUCKET).getPublicUrl(path)
+  return data.publicUrl
+}
+
+async function uploadFileToWordPress(file: File, connection: WooConnection | null): Promise<string> {
+  if (!connection) throw new Error('Connect your WooCommerce store in Settings before uploading files.')
+  if (!connection.wpUsername.trim() || !connection.wpAppPassword.trim()) {
+    throw new Error('Add your WordPress username and application password in Settings to upload files.')
+  }
+
+  const auth = btoa(`${connection.wpUsername.trim()}:${connection.wpAppPassword.trim()}`)
+
+  let res: Response
+  try {
+    res = await fetch(`${normalizeStoreUrl(connection.storeUrl)}/wp-json/wp/v2/media`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${auth}`,
+        'Content-Type': file.type || 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${file.name}"`,
+      },
+      body: file,
+    })
+  } catch {
+    throw new Error('Could not reach your WordPress site to upload the file. Check the store URL in Settings.')
+  }
+
+  const body = (await res.json().catch(() => null)) as { message?: unknown; source_url?: unknown } | null
+  if (!res.ok) {
+    const detail = typeof body?.message === 'string' ? body.message : 'check the username and application password'
+    throw new Error(`WordPress rejected the file (${res.status}): ${detail}`)
+  }
+  if (typeof body?.source_url !== 'string' || !/^https?:\/\//i.test(body.source_url)) {
+    throw new Error('WordPress did not return a link to the uploaded file.')
+  }
+  return body.source_url
+}
+
+/**
+ * Uploads a downloadable file to the storage that matches the operational mode:
+ * Supabase Storage in Standalone mode, the WordPress media library in WooCommerce mode.
+ */
+export async function uploadDownloadableFile(
+  file: File,
+  target: ImageUploadTarget,
+): Promise<string> {
+  if (file.size > MAX_BYTES) throw new Error('File must be under 8 MB.')
+
+  if (target.mode === 'woo') {
+    return uploadFileToWordPress(file, target.connection)
+  }
+  return uploadFileToSupabase(file)
+}
+
 export function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()

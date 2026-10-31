@@ -62,8 +62,8 @@ export default function ProductsPage() {
   }, [products, query, category])
 
   const totalProducts = products.length
-  const lowStock = products.filter((p) => p.stock <= 10).length
-  const outOfStock = products.filter((p) => p.stock <= 0).length
+  const lowStock = products.filter((p) => p.type === 'variable' ? p.stockStatus === 'outofstock' : p.stock <= 10).length
+  const outOfStock = products.filter((p) => p.type === 'variable' ? p.stockStatus === 'outofstock' : p.stock <= 0).length
   const totalValue = products.reduce((sum, p) => sum + p.price * p.stock, 0)
 
   const handleAdd = () => {
@@ -383,8 +383,12 @@ export default function ProductsPage() {
                         {filtered.map((p) => {
                           const isEditingStock = editingStock === p.id
                           const isEditingPrice = editingPrice === p.id
-                          const lowStockBadge = p.stock <= 0 ? 'Out of stock' : p.stock <= 10 ? `${p.stock} left` : `${p.stock}`
-                          const stockColor = p.stock <= 0 ? 'text-red-600' : p.stock <= 10 ? 'text-amber-600' : 'text-slate-600'
+                          const lowStockBadge = p.type === 'variable'
+                            ? (p.stockStatus === 'instock' ? 'In stock' : 'Out of stock')
+                            : p.stock <= 0 ? 'Out of stock' : p.stock <= 10 ? `${p.stock} left` : `${p.stock}`
+                          const stockColor = p.type === 'variable'
+                            ? (p.stockStatus === 'instock' ? 'text-slate-600' : 'text-red-600')
+                            : p.stock <= 0 ? 'text-red-600' : p.stock <= 10 ? 'text-amber-600' : 'text-slate-600'
                           return (
                             <tr key={p.id} className="transition hover:bg-slate-50/60">
                               <td className="py-3.5 pr-4">
@@ -580,8 +584,8 @@ export default function ProductsPage() {
                               <span className="ml-1.5 text-xs text-slate-400 line-through">{formatCurrency(p.price)}</span>
                             )}
                           </div>
-                          <span className={`font-medium ${p.stock <= 0 ? 'text-red-600' : p.stock <= 10 ? 'text-amber-600' : 'text-slate-600'}`}>
-                            {p.stock} in stock
+                          <span className={`font-medium ${p.type === 'variable' ? (p.stockStatus === 'instock' ? 'text-slate-600' : 'text-red-600') : p.stock <= 0 ? 'text-red-600' : p.stock <= 10 ? 'text-amber-600' : 'text-slate-600'}`}>
+                            {p.type === 'variable' ? (p.stockStatus === 'instock' ? 'In stock' : 'Out of stock') : `${p.stock} in stock`}
                           </span>
                         </div>
                       </div>

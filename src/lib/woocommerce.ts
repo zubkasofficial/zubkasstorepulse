@@ -1075,10 +1075,11 @@ async function syncVariations(conn: WooConnection, productId: string, variations
       regular_price: v.price,
       sale_price: v.salePrice ?? '',
       attributes: v.attributes,
+      manage_stock: false,
       stock_status: v.stockStatus,
       weight: v.weight,
-      image: /^https?:\/\//i.test(v.imageUrl) ? { src: v.imageUrl } : null,
     }
+    if (/^https?:\/\//i.test(v.imageUrl)) vBody.image = { src: v.imageUrl }
     if (v.sku.trim()) vBody.sku = v.sku.trim()
     const isNew = v.id.startsWith('new-')
     const path = isNew ? `products/${productId}/variations` : `products/${productId}/variations/${v.id}`
